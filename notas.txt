@@ -96,3 +96,13 @@ Agregué migraciones para la base existente y recuperación de evaluaciones inte
 Cambios principales: modelo de ejecuciones, persistencia e informes históricos, transiciones, pantalla del proyecto y documentación.
 
 Validación: 60 pruebas pasaron; también validé sintaxis Python y templates. Quedan dos avisos deprecados de FastAPI (on_event), sin fallos de pruebas. Los resultados anteriores a este cambio no se pueden reconstruir como ejecuciones históricas; las nuevas evaluaciones sí quedarán guardadas.
+
+---
+
+## Referencia del hackatón
+
+Chat guardado con el título **Gestión e historial de compras**. La implementación detallada está en `app/db.py`, `app/main.py`, `app/financial_report.py`, `templates/project.html` y `templates/report.html`. Las pruebas de historial, exportaciones y transiciones están en `tests/test_project_history.py`; la suite completa registró 60 pruebas exitosas.
+
+Transcripción del diálogo disponible en `transcripcion_completa_hackaton.txt` (34 turnos). Se revisó que los patrones de claves y contraseñas detectables estén redactados; no contiene eventos internos de herramientas.
+
+No copiar claves ni contraseñas desde el chat a documentación. La selección del IDE mostró valores sensibles del `.env`: considerar expuesta la clave de Gemini y el secreto de sesión; revocarlos y reemplazarlos. La clave de cifrado no debe cambiarse sin un plan de migración que vuelva a cifrar los archivos existentes con la clave nueva, ya que reemplazarla directamente puede impedir descifrarlos.
