@@ -13,6 +13,39 @@
 
 {% if tab == "recepcion" %}
 <section class="mt-6 grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+  <div class="space-y-4">
+    {% if user.role == "Carga" %}
+    <form method="post" action="/project/{{ project.id }}/details" class="grid gap-3 rounded-xl border bg-white p-5 md:grid-cols-2">
+      <h2 class="text-lg font-semibold md:col-span-2">Datos para factibilidad financiera</h2>
+      <label class="text-sm font-medium">Ciudad de ejecución<input required name="execution_city" maxlength="120" value="{{ project.execution_city or '' }}" class="mt-1 w-full rounded border px-3 py-2"></label>
+      <label class="text-sm font-medium">Estado<input required name="execution_state" maxlength="120" value="{{ project.execution_state or '' }}" class="mt-1 w-full rounded border px-3 py-2"></label>
+      <label class="text-sm font-medium">Presupuesto máximo, impuestos incluidos<input required type="number" min="0.01" step="0.01" name="budget_amount" value="{{ project.budget_amount or '' }}" class="mt-1 w-full rounded border px-3 py-2"></label>
+      <label class="text-sm font-medium">Moneda<select name="budget_currency" class="mt-1 w-full rounded border px-3 py-2"><option value="USD" {% if project.budget_currency == "USD" %}selected{% endif %}>USD</option><option value="VES" {% if project.budget_currency == "VES" %}selected{% endif %}>VES</option></select></label>
+      <button class="w-fit rounded bg-indigo-700 px-4 py-2 text-white md:col-span-2">Guardar datos del proyecto</button>
+    </form>
+    {% else %}
+    <div class="rounded-xl border bg-white p-5">
+      <h2 class="font-semibold">Datos para factibilidad financiera</h2>
+      <p class="mt-2 text-sm">Destino: {{ project.execution_city or "Pendiente" }}, {{ project.execution_state or "Pendiente" }}</p>
+      <p class="text-sm">Presupuesto máximo con impuestos: {{ project.budget_amount or "Pendiente" }} {{ project.budget_currency or "" }}</p>
+    </div>
+    {% endif %}
+    {% if user.role == "Aprobador" %}
+    <form method="post" action="/project/{{ project.id }}/settings" class="grid gap-3 rounded-xl border bg-white p-5 md:grid-cols-2">
+      <h2 class="text-lg font-semibold md:col-span-2">Referencia cambiaria BCV</h2>
+      <p class="text-xs text-slate-600 md:col-span-2">Indica bolívares por 1 USD, fecha y fuente. Esta tasa queda registrada y se usa en toda la comparación.</p>
+      <label class="text-sm">Tasa BCV (VES por USD)<input required step="any" min="0.000001" type="number" name="bcv_rate" value="{{ project.bcv_rate or '' }}" class="mt-1 w-full rounded border px-2 py-2"></label>
+      <label class="text-sm">Fecha de referencia<input required type="date" name="bcv_date" value="{{ project.bcv_date or '' }}" class="mt-1 w-full rounded border px-2 py-2"></label>
+      <label class="text-sm md:col-span-2">Fuente oficial / enlace<input required name="bcv_source" value="{{ project.bcv_source or '' }}" class="mt-1 w-full rounded border px-2 py-2"></label>
+      <button class="w-fit rounded bg-indigo-700 px-4 py-2 text-white md:col-span-2">Guardar referencia BCV</button>
+    </form>
+    {% elif project.bcv_rate %}
+    <div class="rounded-xl border bg-white p-5 text-sm">
+      <h2 class="font-semibold">Referencia usada</h2>
+      <p class="mt-2">{{ project.bcv_rate }} VES/USD · {{ project.bcv_date }} · {{ project.bcv_source }}</p>
+    </div>
+    {% endif %}
+  </div>
   {% if user.role == "Carga" %}
   <form method="post" enctype="multipart/form-data" action="/project/{{ project.id }}/upload" class="space-y-4 rounded-xl border bg-white p-5">
     <h2 class="text-lg font-semibold">Recibir archivos</h2>
@@ -37,9 +70,13 @@
 {% elif tab == "evaluacion" %}
 <section class="mt-6 rounded-xl border bg-white p-6" x-data="{busy:false, messages:[], error:''}">
   <h2 class="text-xl font-semibold">Evaluar propuestas de servicios</h2>
-  <p class="mt-2 text-sm text-slate-600">Validación determinística de inyección, aritmética, alcance, compatibilidad y costo total.</p>
+  <p class="mt-2 text-sm text-slate-600">Valida propuestas y compara el TCO con el presupuesto en USD, usando la tasa BCV registrada. Las propuestas en VES también se convierten a USD.</p>
   {% if user.role in ["Carga", "Revisor", "Aprobador"] %}
+  {% if evaluation_ready %}
   <button :disabled="busy" @click="busy=true; error=''; messages=[]; const stream=new EventSource('/project/{{ project.id }}/evaluate/stream'); stream.addEventListener('progress', e=>messages.push(JSON.parse(e.data).message)); stream.addEventListener('resultado', e=>messages.push(JSON.parse(e.data).message)); stream.addEventListener('error', e=>{ if(e.data){error=JSON.parse(e.data).message; stream.close(); busy=false;} }); stream.addEventListener('done', ()=>{stream.close(); busy=false; window.location.href='/project/{{ project.id }}?tab=revision';});" class="mt-4 rounded-lg bg-indigo-700 px-5 py-2.5 font-semibold text-white disabled:opacity-50">Iniciar evaluación</button>
+  {% else %}
+  <p class="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Antes de evaluar, completa ciudad, estado y presupuesto con impuestos incluidos; el Aprobador debe registrar tasa BCV, fecha y fuente. También se requiere el PDF base y entre 3 y 20 propuestas.</p>
+  {% endif %}
   {% endif %}
   <p x-show="error" x-text="error" class="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800"></p>
   <ol class="mt-5 space-y-2 text-sm" aria-live="polite"><template x-for="(message, index) in messages" :key="index"><li class="rounded-md bg-slate-50 px-3 py-2" x-text="message"></li></template></ol>
@@ -48,13 +85,23 @@
 <section class="mt-6 space-y-6">
   <div class="overflow-x-auto rounded-xl border bg-white">
     <table class="w-full min-w-[850px] text-left text-sm">
-      <thead class="bg-slate-100 text-xs uppercase text-slate-600"><tr><th class="p-3">Propuesta</th><th class="p-3">Proveedor</th><th class="p-3">Subtotal declarado</th><th class="p-3">TCO calculado</th><th class="p-3">Dictamen</th><th class="p-3">Motivos / evidencia</th></tr></thead>
+      <thead class="bg-slate-100 text-xs uppercase text-slate-600"><tr><th class="p-3">Propuesta</th><th class="p-3">Proveedor</th><th class="p-3">Subtotal</th><th class="p-3">TCO original</th><th class="p-3">TCO USD / presupuesto</th><th class="p-3">Alcance</th><th class="p-3">Dictamen</th><th class="p-3">Motivos / evidencia</th></tr></thead>
       <tbody class="divide-y">
       {% for file in files if file.kind == "propuesta" %}
         {% set audit = file.audit_json | from_json if file.audit_json else none %}
-        <tr class="align-top"><td class="p-3 font-medium">{{ file.original_name }}</td><td class="p-3">{{ audit.propuesta.proveedor if audit and audit.propuesta.proveedor else "No identificado" }}</td><td class="p-3">{{ audit.propuesta.totales_declarados.subtotal if audit else "—" }}</td><td class="p-3">{{ audit.tco.total if audit and audit.tco else "—" }}</td><td class="p-3"><span class="rounded-full px-2 py-1 text-xs {% if audit and audit.descartada %}bg-red-100 text-red-800{% elif audit %}bg-emerald-100 text-emerald-800{% else %}bg-slate-100{% endif %}">{% if audit %}{{ "Descartada" if audit.descartada else "Válida" }}{% else %}Pendiente{% endif %}</span><p class="mt-2 text-xs text-slate-500">{{ file.review_decision or "" }}</p></td><td class="max-w-md p-3">{% if audit %}<ul class="space-y-1">{% for reason in audit.motivos_descarte %}<li>{{ reason }}</li>{% endfor %}</ul>{% if audit.propuesta["items"] %}<details class="mt-2"><summary class="cursor-pointer text-indigo-700">Ver evidencia de ítems</summary>{% for item in audit.propuesta["items"] %}<p class="mt-2 text-xs">{{ item.descripcion }} · {{ item.evidencia.archivo }}{% if item.evidencia.pagina %}, pág. {{ item.evidencia.pagina }}{% endif %}</p>{% endfor %}</details>{% endif %}{% else %}Sin evaluación{% endif %}</td></tr>
+        {% set requiere_revision = audit and (audit.alcance_estado != "cumple" or (audit.factibilidad_financiera and audit.factibilidad_financiera.estado == "no_concluyente")) %}
+        <tr class="align-top">
+          <td class="p-3 font-medium">{{ file.original_name }}</td>
+          <td class="p-3">{{ audit.propuesta.proveedor if audit and audit.propuesta.proveedor else "No identificado" }}</td>
+          <td class="p-3">{{ audit.propuesta.totales_declarados.subtotal if audit else "—" }} {{ audit.propuesta.moneda if audit else "" }}</td>
+          <td class="p-3">{{ audit.tco.total if audit and audit.tco else "—" }} {{ audit.tco.moneda if audit and audit.tco else "" }}</td>
+          <td class="p-3">{% if audit and audit.factibilidad_financiera %}{{ audit.factibilidad_financiera.tco_usd or "—" }} / {{ audit.factibilidad_financiera.presupuesto_usd or "—" }} USD<p class="text-xs">{{ audit.factibilidad_financiera.estado|replace("_", " ") }}</p>{% else %}No concluyente{% endif %}</td>
+          <td class="p-3">{{ audit.alcance_estado|replace("_", " ") if audit else "Pendiente" }}</td>
+          <td class="p-3"><span class="rounded-full px-2 py-1 text-xs {% if audit and audit.descartada %}bg-red-100 text-red-800{% elif requiere_revision %}bg-amber-100 text-amber-900{% elif audit %}bg-emerald-100 text-emerald-800{% else %}bg-slate-100{% endif %}">{% if audit %}{{ "Descartada" if audit.descartada else "Revisión manual" if requiere_revision else "Validada" }}{% else %}Pendiente{% endif %}</span><p class="mt-2 text-xs text-slate-500">{{ file.review_decision or "" }}</p></td>
+          <td class="max-w-md p-3">{% if audit %}<ul class="space-y-1">{% for reason in audit.motivos_descarte %}<li>{{ reason }}</li>{% endfor %}</ul>{% for warning in audit.alcance_advertencias %}<p class="mt-1 text-amber-800">{{ warning }}</p>{% endfor %}{% if audit.propuesta["items"] %}<details class="mt-2"><summary class="cursor-pointer text-indigo-700">Ver evidencia de ítems</summary>{% for item in audit.propuesta["items"] %}<p class="mt-2 text-xs">{{ item.descripcion }} · {{ item.evidencia.archivo }}{% if item.evidencia.pagina %}, pág. {{ item.evidencia.pagina }}{% endif %}</p>{% endfor %}</details>{% endif %}{% else %}Sin evaluación{% endif %}</td>
+        </tr>
         {% if audit and user.role in ["Revisor", "Aprobador"] %}
-        <tr><td colspan="6" class="bg-slate-50 px-3 py-3"><form method="post" action="/project/{{ project.id }}/review" class="flex flex-wrap items-center gap-2"><input type="hidden" name="file_id" value="{{ file.id }}"><select name="decision" class="rounded border px-2 py-1"><option value="aceptar">Aceptar</option><option value="observar">Observar</option><option value="confirmar_descarte">Confirmar descarte</option></select><input name="comment" value="{{ file.review_comment or '' }}" placeholder="Nota de revisión" class="min-w-64 flex-1 rounded border px-2 py-1"><button class="rounded bg-slate-800 px-3 py-1 text-white">Guardar dictamen</button></form></td></tr>
+        <tr><td colspan="8" class="bg-slate-50 px-3 py-3"><form method="post" action="/project/{{ project.id }}/review" class="flex flex-wrap items-center gap-2"><input type="hidden" name="file_id" value="{{ file.id }}"><select name="decision" class="rounded border px-2 py-1"><option value="aceptar">Aceptar</option><option value="observar">Observar</option><option value="confirmar_descarte">Confirmar descarte</option></select><input name="comment" value="{{ file.review_comment or '' }}" placeholder="Nota de revisión" class="min-w-64 flex-1 rounded border px-2 py-1"><button class="rounded bg-slate-800 px-3 py-1 text-white">Guardar dictamen</button></form></td></tr>
         {% endif %}
       {% endfor %}
       </tbody>
@@ -62,10 +109,10 @@
   </div>
   {% if user.role == "Aprobador" %}
   <form method="post" action="/project/{{ project.id }}/settings" class="grid gap-3 rounded-xl border bg-white p-5 md:grid-cols-4">
-    <label class="text-sm">Tasa BCV<input required step="any" min="0.000001" type="number" name="bcv_rate" value="{{ project.bcv_rate or '' }}" class="mt-1 w-full rounded border px-2 py-2"></label>
+    <label class="text-sm">Tasa BCV (VES/USD)<input required step="any" min="0.000001" type="number" name="bcv_rate" value="{{ project.bcv_rate or '' }}" class="mt-1 w-full rounded border px-2 py-2"></label>
     <label class="text-sm">Fecha<input required type="date" name="bcv_date" value="{{ project.bcv_date or '' }}" class="mt-1 w-full rounded border px-2 py-2"></label>
-    <label class="text-sm">Fuente<input required name="bcv_source" value="{{ project.bcv_source or '' }}" class="mt-1 w-full rounded border px-2 py-2"></label>
-    <label class="text-sm">Estado<select name="status" class="mt-1 w-full rounded border px-2 py-2">{% for status in ["Revisión", "Comité", "Adjudicado"] %}<option {% if project.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select></label>
+    <label class="text-sm">Fuente / enlace<input required name="bcv_source" value="{{ project.bcv_source or '' }}" class="mt-1 w-full rounded border px-2 py-2"></label>
+    <label class="text-sm">Estado<select name="status" class="mt-1 w-full rounded border px-2 py-2">{% for status in ["Recepción", "Revisión", "Comité", "Adjudicado"] %}<option {% if project.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select></label>
     <button class="w-fit rounded bg-indigo-700 px-4 py-2 text-white md:col-span-4">Guardar tasa y estado</button>
   </form>
   {% endif %}

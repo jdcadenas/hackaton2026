@@ -1,6 +1,6 @@
 from enum import Enum
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -88,7 +88,63 @@ class TCO(BaseModel):
     recargos: float
     iva: float
     total: float
+    moneda: Optional[str] = None
+    completo: bool = True
+    advertencias: list[str] = Field(default_factory=list)
     desglose: list[TCOConcepto] = Field(default_factory=list)
+
+
+class PriceSource(BaseModel):
+    url: str
+    precio_usd: float
+    fecha_consulta: str
+
+
+class MarketPriceReview(BaseModel):
+    componente: str
+    precio_ofertado_usd: Optional[float] = None
+    minimo_mercado_usd: Optional[float] = None
+    maximo_mercado_usd: Optional[float] = None
+    confianza: float = Field(ge=0, le=1)
+    estado: Literal[
+        "sobre_rango_observado",
+        "en_rango_o_menor",
+        "datos_insuficientes",
+        "sin_datos",
+        "no_comparable",
+    ]
+    fuentes: list[PriceSource] = Field(default_factory=list)
+
+
+class FinancialAssessment(BaseModel):
+    estado: Literal["dentro_presupuesto", "sobre_presupuesto", "no_concluyente"]
+    moneda_propuesta: Optional[str] = None
+    tco_propuesta: Optional[float] = None
+    tco_usd: Optional[float] = None
+    tco_ves: Optional[float] = None
+    presupuesto_original: float
+    moneda_presupuesto: str
+    presupuesto_usd: Optional[float] = None
+    diferencia_usd: Optional[float] = None
+    tasa_bcv_ves_por_usd: float
+    tasa_bcv_fecha: str
+    tasa_bcv_fuente: str
+    advertencias: list[str] = Field(default_factory=list)
+
+
+class ProjectRequirement(BaseModel):
+    descripcion: str
+    cantidad: Optional[float] = None
+    unidad: Optional[str] = None
+    especificaciones: list[str] = Field(default_factory=list)
+    terminos_clave: list[str] = Field(default_factory=list)
+    evidencia: Evidencia
+
+
+class ProjectRequirements(BaseModel):
+    archivo: str = ""
+    requisitos: list[ProjectRequirement] = Field(default_factory=list)
+    advertencias: list[str] = Field(default_factory=list)
 
 
 class ResultadoAuditoria(BaseModel):
@@ -96,6 +152,10 @@ class ResultadoAuditoria(BaseModel):
     descartada: bool = False
     motivos_descarte: list[str] = Field(default_factory=list)
     tco: Optional[TCO] = None
+    factibilidad_financiera: Optional[FinancialAssessment] = None
+    precios_mercado: list[MarketPriceReview] = Field(default_factory=list)
+    alcance_estado: Literal["cumple", "incompleto", "no_concluyente"] = "no_concluyente"
+    alcance_advertencias: list[str] = Field(default_factory=list)
     technical_score: float = 0.0
     notas: str = ""
 

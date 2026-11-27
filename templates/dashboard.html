@@ -10,9 +10,14 @@
   </form>
 </div>
 {% if user.role == "Carga" %}
-<form method="post" action="/projects" class="mt-6 flex max-w-xl gap-2 rounded-xl border bg-white p-4">
-  <input required name="title" maxlength="200" placeholder="Nombre del proyecto" class="min-w-0 flex-1 rounded-lg border px-3 py-2">
-  <button class="rounded-lg bg-indigo-700 px-4 py-2 font-semibold text-white">Crear proyecto</button>
+<form method="post" action="/projects" class="mt-6 grid max-w-4xl gap-3 rounded-xl border bg-white p-4 md:grid-cols-2">
+  <label class="text-sm font-medium md:col-span-2">Nombre del proyecto<input required name="title" maxlength="200" class="mt-1 w-full rounded-lg border px-3 py-2"></label>
+  <label class="text-sm font-medium">Ciudad de ejecución<input required name="execution_city" maxlength="120" placeholder="Caracas" class="mt-1 w-full rounded-lg border px-3 py-2"></label>
+  <label class="text-sm font-medium">Estado<input required name="execution_state" maxlength="120" placeholder="Distrito Capital" class="mt-1 w-full rounded-lg border px-3 py-2"></label>
+  <label class="text-sm font-medium">Presupuesto máximo, impuestos incluidos<input required type="number" name="budget_amount" min="0.01" step="0.01" class="mt-1 w-full rounded-lg border px-3 py-2"></label>
+  <label class="text-sm font-medium">Moneda del presupuesto<select name="budget_currency" class="mt-1 w-full rounded-lg border px-3 py-2"><option value="USD">USD — referencia principal</option><option value="VES">VES — se convierte con BCV</option></select></label>
+  <p class="text-xs text-slate-500 md:col-span-2">La factibilidad se reportará principalmente en USD. El presupuesto en VES se convertirá usando la tasa BCV aprobada y registrada para este proyecto.</p>
+  <button class="w-fit rounded-lg bg-indigo-700 px-4 py-2 font-semibold text-white md:col-span-2">Crear proyecto</button>
 </form>
 {% endif %}
 <div class="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">

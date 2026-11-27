@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import logging
+import math
 import os
 import queue
 import re
@@ -10,6 +11,9 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
@@ -18,6 +22,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from agent.pipeline import run_pipeline
+from agent.finance import SUPPORTED_CURRENCIES
+from agent.project_requirements import extract_project_requirements
+from agent.schemas import ProjectRequirements
 from app.auth import COOKIE_NAME, authenticate, create_session, current_user
 from app.crypto import decrypt_bytes, encrypt_bytes
 from app.db import AuditEvent, DATA_DIR, Project, ProjectFile, SessionLocal, get_db, init_db
@@ -58,6 +65,79 @@ def _audit(db: Session, project_id: str, user: dict, action: str, detail: str) -
             detail=detail,
         )
     )
+
+
+def _invalidate_evaluations(db: Session, project: Project, clear_requirements: bool = False) -> None:
+    for record in db.scalars(
+        select(ProjectFile).where(ProjectFile.project_id == project.id, ProjectFile.kind == "propuesta")
+    ):
+        record.audit_json = None
+        record.review_decision = None
+        record.review_comment = None
+        record.quality = "pendiente"
+    if clear_requirements:
+        project.requirements_json = None
+    if project.status != "Recepción":
+        project.status = "Recepción"
+
+
+def _validated_budget(amount: str, currency: str) -> Decimal:
+    try:
+        value = Decimal(amount)
+    except (InvalidOperation, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="El presupuesto debe ser un monto numérico válido.") from exc
+    if not value.is_finite() or value <= 0:
+        raise HTTPException(status_code=400, detail="El presupuesto debe ser mayor que cero.")
+    if value > Decimal("9999999999999999.99"):
+        raise HTTPException(status_code=400, detail="El presupuesto supera la precisión máxima admitida.")
+    if currency not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail="La moneda del presupuesto debe ser USD o VES.")
+    rounded = value.quantize(Decimal("0.01"))
+    if rounded != value:
+        raise HTTPException(status_code=400, detail="El presupuesto admite hasta dos decimales.")
+    return rounded
+
+
+def _is_bcv_source(source: Optional[str]) -> bool:
+    if not source:
+        return False
+    normalized = source.casefold()
+    return "bcv.org.ve" in normalized or "banco central de venezuela" in normalized or re.search(r"\bbcv\b", normalized) is not None
+
+
+def _valid_bcv_date(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    try:
+        return date.fromisoformat(value) <= datetime.now(ZoneInfo("America/Caracas")).date()
+    except ValueError:
+        return False
+
+
+def _require_financial_setup(project: Project) -> None:
+    missing = []
+    if not project.execution_city or not project.execution_state:
+        missing.append("ciudad y estado de ejecución")
+    if (
+        project.budget_amount is None
+        or not project.budget_amount.is_finite()
+        or project.budget_amount <= 0
+        or project.budget_currency not in SUPPORTED_CURRENCIES
+    ):
+        missing.append("presupuesto con moneda")
+    if (
+        project.bcv_rate is None
+        or not math.isfinite(float(project.bcv_rate))
+        or project.bcv_rate <= 0
+        or not _valid_bcv_date(project.bcv_date)
+        or not _is_bcv_source(project.bcv_source)
+    ):
+        missing.append("referencia BCV aprobada, vigente y con fuente identificable")
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail="Completa antes de evaluar: " + ", ".join(missing) + ".",
+        )
 
 
 def _project_or_404(db: Session, project_id: str) -> Project:
@@ -148,17 +228,69 @@ def dashboard(request: Request, status: str = "", query: str = "", db: Session =
 
 
 @app.post("/projects")
-def create_project(request: Request, title: str = Form(...), db: Session = Depends(get_db)):
+def create_project(
+    request: Request,
+    title: str = Form(...),
+    execution_city: str = Form(...),
+    execution_state: str = Form(...),
+    budget_amount: str = Form(...),
+    budget_currency: str = Form(...),
+    db: Session = Depends(get_db),
+):
     user = _user(request)
     _require_role(user, "Carga")
     title = title.strip()
-    if not title:
-        raise HTTPException(status_code=400, detail="El nombre del proyecto es obligatorio.")
-    project = Project(id=str(uuid.uuid4()), title=title)
+    city, state = execution_city.strip(), execution_state.strip()
+    if not title or not city or not state:
+        raise HTTPException(status_code=400, detail="Indica el nombre, la ciudad y el estado del proyecto.")
+    project = Project(
+        id=str(uuid.uuid4()),
+        title=title,
+        execution_city=city,
+        execution_state=state,
+        budget_amount=_validated_budget(budget_amount, budget_currency),
+        budget_currency=budget_currency,
+    )
     db.add(project)
     _audit(db, project.id, user, "proyecto_creado", f"Proyecto creado: {title}")
     db.commit()
     return RedirectResponse(f"/project/{project.id}?tab=recepcion", status_code=303)
+
+
+@app.post("/project/{project_id}/details")
+def update_project_details(
+    request: Request,
+    project_id: str,
+    execution_city: str = Form(...),
+    execution_state: str = Form(...),
+    budget_amount: str = Form(...),
+    budget_currency: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = _user(request)
+    _require_role(user, "Carga")
+    project = _project_or_404(db, project_id)
+    if project.status == "Evaluación":
+        raise HTTPException(status_code=409, detail="No se pueden cambiar los datos durante una evaluación.")
+    city, state = execution_city.strip(), execution_state.strip()
+    if not city or not state:
+        raise HTTPException(status_code=400, detail="Indica la ciudad y el estado de ejecución.")
+    amount = _validated_budget(budget_amount, budget_currency)
+    changed = (
+        city != project.execution_city
+        or state != project.execution_state
+        or amount != project.budget_amount
+        or budget_currency != project.budget_currency
+    )
+    project.execution_city = city
+    project.execution_state = state
+    project.budget_amount = amount
+    project.budget_currency = budget_currency
+    if changed:
+        _invalidate_evaluations(db, project)
+        _audit(db, project_id, user, "datos_proyecto_actualizados", "Se actualizaron ubicación o presupuesto; la evaluación anterior quedó invalidada.")
+    db.commit()
+    return RedirectResponse(f"/project/{project_id}?tab=recepcion", status_code=303)
 
 
 @app.get("/project/{project_id}")
@@ -168,6 +300,15 @@ def project_page(request: Request, project_id: str, tab: str = "recepcion", db: 
         return RedirectResponse("/login", status_code=303)
     project = _project_or_404(db, project_id)
     files = db.scalars(select(ProjectFile).where(ProjectFile.project_id == project_id).order_by(ProjectFile.original_name)).all()
+    proposal_count = sum(file.kind == "propuesta" for file in files)
+    evaluation_ready = (
+        bool(project.execution_city and project.execution_state)
+        and project.budget_amount is not None
+        and project.budget_currency in SUPPORTED_CURRENCIES
+        and bool(project.bcv_rate and project.bcv_date and project.bcv_source)
+        and any(file.kind == "proyecto" for file in files)
+        and 3 <= proposal_count <= 20
+    )
     return templates.TemplateResponse(
         request=request,
         name="project.html",
@@ -175,6 +316,7 @@ def project_page(request: Request, project_id: str, tab: str = "recepcion", db: 
             "user": user,
             "project": project,
             "files": files,
+            "evaluation_ready": evaluation_ready,
             "tab": tab if tab in {"recepcion", "evaluacion", "revision"} else "recepcion",
             "events": db.scalars(select(AuditEvent).where(AuditEvent.project_id == project_id).order_by(AuditEvent.created_at.desc())).all(),
         },
@@ -192,6 +334,8 @@ async def upload_project_files(
     user = _user(request)
     _require_role(user, "Carga")
     project = _project_or_404(db, project_id)
+    if project.status == "Evaluación":
+        raise HTTPException(status_code=409, detail="No se pueden cargar archivos durante una evaluación.")
     if Path(project_document.filename or "").suffix.lower() != ".pdf":
         raise HTTPException(status_code=400, detail="El documento base debe ser un PDF.")
     if not 3 <= len(proposals) <= 20:
@@ -221,6 +365,7 @@ async def upload_project_files(
                 quality=quality,
             )
         )
+    _invalidate_evaluations(db, project, clear_requirements=True)
     project.status = "Recepción"
     _audit(db, project_id, user, "archivos_cargados", f"Se recibieron 1 documento base y {len(proposals)} propuestas.")
     db.commit()
@@ -230,10 +375,31 @@ async def upload_project_files(
 def _evaluate(project_id: str, progress) -> None:
     db = SessionLocal()
     try:
+        project = db.get(Project, project_id)
+        if project is None:
+            raise RuntimeError("No se encontró el proyecto para evaluar.")
+        _require_financial_setup(project)
         records = db.scalars(
             select(ProjectFile).where(ProjectFile.project_id == project_id, ProjectFile.kind == "propuesta")
         ).all()
+        project_document = db.scalars(
+            select(ProjectFile)
+            .where(ProjectFile.project_id == project_id, ProjectFile.kind == "proyecto")
+            .order_by(ProjectFile.uploaded_at.desc())
+        ).first()
+        if project_document is None:
+            raise RuntimeError("Carga el PDF de requerimientos antes de evaluar.")
         with tempfile.TemporaryDirectory(prefix="propuesta-lote-") as temp_dir:
+            project_pdf = Path(temp_dir) / project_document.original_name
+            project_pdf.write_bytes(
+                decrypt_bytes(
+                    (DATA_DIR / project_document.relative_path).read_bytes(),
+                    project_document.id.encode("utf-8"),
+                )
+            )
+            project_requirements = extract_project_requirements(str(project_pdf))
+            project.requirements_json = project_requirements.model_dump_json()
+            db.commit()
             proposal_dir = Path(temp_dir) / "propuestas"
             proposal_dir.mkdir()
             for record in records:
@@ -242,13 +408,38 @@ def _evaluate(project_id: str, progress) -> None:
                     record.id.encode("utf-8"),
                 )
                 (proposal_dir / record.original_name).write_bytes(plain)
-            audits, ranking = run_pipeline(temp_dir, progress=progress)
+            context = {
+                "execution_city": project.execution_city,
+                "execution_state": project.execution_state,
+                "budget_amount": str(project.budget_amount),
+                "budget_currency": project.budget_currency,
+                "bcv_rate": project.bcv_rate,
+                "bcv_date": project.bcv_date,
+                "bcv_source": project.bcv_source,
+            }
+            audits, ranking = run_pipeline(
+                temp_dir,
+                progress=progress,
+                project_context=context,
+                project_requirements=project_requirements,
+            )
         by_name = {audit.propuesta.archivo: audit for audit in audits}
         for record in records:
             audit = by_name.get(record.original_name)
             if audit:
                 record.audit_json = audit.model_dump_json()
-                record.quality = "rojo" if audit.descartada else "verde"
+                if audit.descartada:
+                    record.quality = "rojo"
+                elif (
+                    audit.alcance_estado != "cumple"
+                    or (
+                        audit.factibilidad_financiera
+                        and audit.factibilidad_financiera.estado == "no_concluyente"
+                    )
+                ):
+                    record.quality = "amarillo"
+                else:
+                    record.quality = "verde"
         project = db.get(Project, project_id)
         if project:
             project.status = "Revisión"
@@ -272,13 +463,24 @@ async def evaluate_stream(request: Request, project_id: str, db: Session = Depen
     user = _user(request)
     _require_role(user, "Carga", "Revisor", "Aprobador")
     project = _project_or_404(db, project_id)
+    _require_financial_setup(project)
     if project.status == "Evaluación":
         raise HTTPException(status_code=409, detail="Ya hay una evaluación en curso.")
-    proposal_count = db.scalar(
-        select(ProjectFile.id).where(ProjectFile.project_id == project_id, ProjectFile.kind == "propuesta").limit(1)
+    project_document = db.scalar(
+        select(ProjectFile.id)
+        .where(ProjectFile.project_id == project_id, ProjectFile.kind == "proyecto")
+        .order_by(ProjectFile.uploaded_at.desc())
+        .limit(1)
     )
-    if not proposal_count:
-        raise HTTPException(status_code=400, detail="Carga propuestas antes de iniciar la evaluación.")
+    if not project_document:
+        raise HTTPException(status_code=400, detail="Carga el PDF de requerimientos antes de evaluar.")
+    proposal_count = len(
+        db.scalars(
+            select(ProjectFile.id).where(ProjectFile.project_id == project_id, ProjectFile.kind == "propuesta")
+        ).all()
+    )
+    if not 3 <= proposal_count <= 20:
+        raise HTTPException(status_code=400, detail="Carga entre 3 y 20 propuestas antes de evaluar.")
     project.status = "Evaluación"
     _audit(db, project_id, user, "evaluacion_iniciada", "Evaluación determinística iniciada.")
     db.commit()
@@ -361,12 +563,35 @@ def update_project_settings(
     user = _user(request)
     _require_role(user, "Aprobador")
     project = _project_or_404(db, project_id)
-    if bcv_rate <= 0 or not bcv_source.strip() or status and status not in PROJECT_STATUSES:
+    if (
+        not math.isfinite(bcv_rate)
+        or bcv_rate <= 0
+        or not _is_bcv_source(bcv_source.strip())
+        or status and status not in PROJECT_STATUSES
+    ):
         raise HTTPException(status_code=400, detail="Indica una tasa BCV positiva, fuente y estado válido.")
+    try:
+        parsed_bcv_date = date.fromisoformat(bcv_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="La fecha de la referencia BCV no es válida.") from exc
+    if parsed_bcv_date > datetime.now(ZoneInfo("America/Caracas")).date():
+        raise HTTPException(status_code=400, detail="La fecha de referencia BCV no puede estar en el futuro.")
+    changed = (
+        float(project.bcv_rate or 0) != bcv_rate
+        or project.bcv_date != bcv_date
+        or project.bcv_source != bcv_source.strip()
+    )
+    if changed and status and status != "Recepción":
+        raise HTTPException(
+            status_code=400,
+            detail="Al cambiar la referencia BCV la evaluación se invalida; selecciona Recepción y vuelve a evaluar antes de avanzar el estado.",
+        )
     project.bcv_rate = bcv_rate
     project.bcv_date = bcv_date
     project.bcv_source = bcv_source.strip()
-    if status:
+    if changed:
+        _invalidate_evaluations(db, project)
+    if status and not changed:
         project.status = status
     _audit(db, project_id, user, "ajustes_actualizados", f"Tasa BCV {bcv_rate:g} del {bcv_date}; estado {project.status}. Fuente: {bcv_source.strip()}")
     db.commit()
@@ -383,7 +608,16 @@ def report_page(request: Request, project_id: str, db: Session = Depends(get_db)
         select(ProjectFile).where(ProjectFile.project_id == project_id, ProjectFile.kind == "propuesta")
     ).all()
     rows = [{"file": record, "audit": _load_audit(record)} for record in records]
-    return templates.TemplateResponse(request=request, name="report.html", context={"user": user, "project": project, "rows": rows})
+    requirements = (
+        ProjectRequirements.model_validate_json(project.requirements_json)
+        if project.requirements_json
+        else None
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="report.html",
+        context={"user": user, "project": project, "rows": rows, "requirements": requirements},
+    )
 
 
 @app.get("/project/{project_id}/report.csv")
@@ -396,19 +630,57 @@ def report_csv(request: Request, project_id: str, db: Session = Depends(get_db))
     ).all()
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer)
-    writer.writerow(["proyecto", "archivo", "proveedor", "descartada", "subtotal_declarado_usd", "tco_usd", "dictamen", "motivos"])
+    writer.writerow([
+        "proyecto",
+        "ciudad_ejecucion",
+        "estado_ejecucion",
+        "presupuesto_original_impuestos_incluidos",
+        "moneda_presupuesto",
+        "presupuesto_usd",
+        "archivo",
+        "proveedor",
+        "moneda_propuesta",
+        "descartada",
+        "subtotal_declarado",
+        "tco_propuesta",
+        "tco_usd",
+        "factibilidad",
+        "diferencia_presupuesto_usd",
+        "tasa_bcv_ves_por_usd",
+        "fecha_bcv",
+        "fuente_bcv",
+        "alcance",
+        "precios_mercado_json",
+        "dictamen",
+        "motivos",
+    ])
     for record in records:
         audit = _load_audit(record) or {}
         proposal = audit.get("propuesta", {})
         totals = proposal.get("totales_declarados", {})
         tco = audit.get("tco") or {}
+        financial = audit.get("factibilidad_financiera") or {}
         writer.writerow([
             project.title,
+            project.execution_city or "",
+            project.execution_state or "",
+            str(project.budget_amount) if project.budget_amount is not None else "",
+            project.budget_currency or "",
+            financial.get("presupuesto_usd", ""),
             record.original_name,
             proposal.get("proveedor") or "",
+            proposal.get("moneda") or "",
             audit.get("descartada", ""),
             totals.get("subtotal") if totals.get("subtotal") is not None else "",
             tco.get("total", ""),
+            financial.get("tco_usd", ""),
+            financial.get("estado", ""),
+            financial.get("diferencia_usd", ""),
+            project.bcv_rate or "",
+            project.bcv_date or "",
+            project.bcv_source or "",
+            audit.get("alcance_estado", ""),
+            json.dumps(audit.get("precios_mercado", []), ensure_ascii=False),
             record.review_decision or "",
             " | ".join(audit.get("motivos_descarte", [])),
         ])

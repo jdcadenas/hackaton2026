@@ -21,12 +21,14 @@ def propuesta(
     total=116.0,
     archivo="oferta.pdf",
     location="Caracas",
+    currency="USD",
 ):
     return PropuestaExtraida(
         archivo=archivo,
         fuente=FuenteEnum.pdf,
         proveedor="Proveedor",
         ubicacion_proveedor=location,
+        moneda=currency,
         items=items if items is not None else [
             Item(
                 descripcion="Equipo",

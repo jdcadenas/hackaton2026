@@ -1,10 +1,17 @@
 import os
 from typing import Callable, List, Optional, Tuple
 
+from agent.finance import assess_financial_feasibility, to_usd
 from agent.extractor import extract_proposal
 from agent.market.search_grounding import research_market_price
 from agent.ranker import rank_audits
-from agent.schemas import PropuestaExtraida, ResultadoAuditoria
+from agent.schemas import (
+    MarketPriceReview,
+    PriceSource,
+    ProjectRequirements,
+    PropuestaExtraida,
+    ResultadoAuditoria,
+)
 from agent.tco import calculate_tco
 from agent.validators.arithmetic import validate_arithmetic
 from agent.validators.compatibility import validate_compatibility
@@ -33,6 +40,8 @@ def run_pipeline(
     lote_dir: str,
     api_key: Optional[str] = None,
     progress: Optional[ProgressCallback] = None,
+    project_context: Optional[dict] = None,
+    project_requirements: Optional[ProjectRequirements] = None,
 ) -> Tuple[List[ResultadoAuditoria], List[str]]:
     files = _proposal_files(lote_dir)
     audits: List[ResultadoAuditoria] = []
@@ -68,29 +77,121 @@ def run_pipeline(
         if injection.detected or any("Texto sospechoso transcrito literalmente" in issue for issue in proposal.anomalias_ingesta):
             reasons.append(f"Posible prompt injection detectado: {injection.matches or 'texto sospechoso en el documento'}")
 
+        scope_status = "no_concluyente"
+        scope_warnings: list[str] = []
         if not reasons:
             report("validacion", f"Validando aritmética, alcance y compatibilidad: {filename}")
-            for validator in (validate_arithmetic, validate_scope, validate_compatibility):
-                is_valid, validator_reasons = validator(proposal)
+            validators = [validate_arithmetic]
+            if project_requirements is None:
+                validators.append(validate_scope)
+            validators.append(validate_compatibility)
+            for validator in validators:
+                if validator is validate_scope:
+                    is_valid, validator_reasons = validate_scope(proposal)
+                    scope_status = "cumple" if is_valid else "incompleto"
+                elif validator is validate_arithmetic:
+                    is_valid, validator_reasons = validate_arithmetic(proposal)
+                else:
+                    is_valid, validator_reasons = validate_compatibility(proposal)
                 if not is_valid:
                     reasons.extend(validator_reasons)
                     break
+
+            if project_requirements is not None:
+                if not project_requirements.requisitos:
+                    scope_status = "no_concluyente"
+                    scope_warnings = project_requirements.advertencias or [
+                        "No se extrajeron requisitos verificables del documento base."
+                    ]
+                elif any(
+                    requirement.evidencia.pagina is None or requirement.evidencia.confianza < 0.75
+                    for requirement in project_requirements.requisitos
+                ):
+                    scope_status = "no_concluyente"
+                    scope_warnings = [
+                        "La extracción de uno o más requisitos no tiene página o confianza suficiente; "
+                        "el alcance requiere revisión humana."
+                    ]
+                else:
+                    is_valid, scope_warnings = validate_scope(proposal, project_requirements)
+                    scope_status = "cumple" if is_valid else "incompleto"
+                    if not is_valid:
+                        reasons.extend(scope_warnings)
+        elif project_requirements is not None:
+            scope_warnings = project_requirements.advertencias or [
+                "No se verificó el alcance porque falló una validación previa."
+            ]
 
         discarded = bool(reasons)
         tco = None
         if proposal.totales_declarados.subtotal is not None:
             try:
-                tco = calculate_tco(proposal)
+                destination = None
+                if project_context:
+                    destination = ", ".join(
+                        value for value in (
+                            project_context.get("execution_city"),
+                            project_context.get("execution_state"),
+                        ) if value
+                    )
+                tco = calculate_tco(proposal, destination=destination)
             except ValueError as exc:
                 reasons.append(str(exc))
                 discarded = True
 
         score = 0.0 if discarded else 100.0
+        financial_assessment = None
+        if project_context and project_context.get("budget_amount") is not None:
+            financial_assessment = assess_financial_feasibility(
+                tco=tco,
+                proposal_currency=proposal.moneda,
+                budget_amount=project_context["budget_amount"],
+                budget_currency=project_context["budget_currency"],
+                bcv_rate=project_context["bcv_rate"],
+                bcv_date=project_context["bcv_date"],
+                bcv_source=project_context["bcv_source"],
+            )
+
+        market_reviews: list[MarketPriceReview] = []
         if not discarded:
             report("mercado", f"Consultando precios con Google Search: {filename}")
             for item in proposal.items:
                 if item.descripcion.strip():
-                    research_market_price(item.descripcion, api_key=api_key)
+                    research = research_market_price(item.descripcion, api_key=api_key)
+                    proposed_usd = to_usd(
+                        item.precio_unitario,
+                        proposal.moneda,
+                        project_context.get("bcv_rate") if project_context else None,
+                    )
+                    prices = research.precios_encontrados
+                    if not prices:
+                        market_status = "sin_datos"
+                    elif proposed_usd is None:
+                        market_status = "no_comparable"
+                    elif research.confianza < 0.8:
+                        market_status = "datos_insuficientes"
+                    elif proposed_usd > max(price.precio_usd for price in prices):
+                        market_status = "sobre_rango_observado"
+                    else:
+                        market_status = "en_rango_o_menor"
+                    market_reviews.append(
+                        MarketPriceReview(
+                            componente=item.descripcion,
+                            precio_ofertado_usd=float(proposed_usd) if proposed_usd is not None else None,
+                            minimo_mercado_usd=min((price.precio_usd for price in prices), default=None),
+                            maximo_mercado_usd=max((price.precio_usd for price in prices), default=None),
+                            confianza=research.confianza,
+                            estado=market_status,
+                            fuentes=[
+                                PriceSource(
+                                    url=price.url,
+                                    precio_usd=price.precio_usd,
+                                    fecha_consulta=price.fecha_consulta,
+                                )
+                                for price in prices
+                            ],
+                        )
+                    )
         report("completado", f"Auditoría terminada: {filename}")
         audits.append(
             ResultadoAuditoria(
@@ -98,8 +199,22 @@ def run_pipeline(
                 descartada=discarded,
                 motivos_descarte=reasons,
                 tco=tco,
+                factibilidad_financiera=financial_assessment,
+                precios_mercado=market_reviews,
+                alcance_estado=scope_status,
+                alcance_advertencias=scope_warnings,
                 technical_score=score,
-                notas="Validaciones determinísticas completadas." if not discarded else "Descartada; revisar los motivos y su evidencia.",
+                notas=(
+                    "Descartada; revisar los motivos y su evidencia."
+                    if discarded
+                    else "Requiere revisión manual por resultados no concluyentes."
+                    if scope_status != "cumple"
+                    or (
+                        financial_assessment
+                        and financial_assessment.estado == "no_concluyente"
+                    )
+                    else "Validaciones determinísticas completadas."
+                ),
             )
         )
 

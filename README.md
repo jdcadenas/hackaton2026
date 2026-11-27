@@ -170,7 +170,7 @@ lote/
     └── oferta-c.png
 ```
 
-Los fallos de lectura o extracción se registran como propuestas descartadas; no se sustituyen con precios ni contenido ficticios. El coste de mercado se consulta con Google Search Grounding y se cachea por componente y día. La búsqueda no decide por sí sola el descarte o ranking.
+Los fallos de lectura o extracción se registran explícitamente; si faltan datos financieros, moneda, impuestos o una cotización de entrega verificable, la factibilidad queda como **no concluyente** en vez de inventar costos. La búsqueda de mercado usa Google Search Grounding, conserva URLs y precios observados en el informe y se cachea por componente y día. Un precio por encima del máximo observado genera una alerta, no un descarte automático.
 
 El archivo `validador_salida.html` implementa un validador local del contrato indicado en estas instrucciones (claves exactas, tipos, timestamps `-04:00` y ranking sin duplicados). No se proporcionó el validador oficial original, por lo que este archivo no se presenta como copia oficial.
 
@@ -188,7 +188,11 @@ Windows (PowerShell):
 uvicorn app.main:app --reload
 ```
 
-Abre `http://127.0.0.1:8000/login`. Crea un proyecto desde el panel, carga un PDF de proyecto y entre 3 y 20 propuestas. Luego usa las pestañas **Recepción**, **Evaluación** y **Revisión**. El informe se puede imprimir a PDF desde el navegador y también exportar a CSV. La tasa BCV requiere rol Aprobador y registra valor, fecha y fuente.
+Abre `http://127.0.0.1:8000/login`. Al crear un proyecto, el rol **Carga** registra ciudad, estado y presupuesto máximo con impuestos incluidos, en USD o VES. En **Recepción**, carga el PDF base y entre 3 y 20 propuestas. El evaluador extrae requisitos del PDF base con Gemini y conserva páginas de evidencia.
+
+Antes de evaluar, el rol **Aprobador** registra la tasa BCV en VES por USD, fecha y fuente oficial. El sistema exige esa referencia y utiliza la misma tasa para normalizar propuestas y presupuesto a USD; también informa equivalentes en VES. Las propuestas deben indicar moneda y total final o impuestos desglosados. Si no se conoce la moneda, faltan impuestos, el PDF no produce requisitos verificables o el flete no está confirmado para el destino, no se declara la propuesta financieramente factible: queda como no concluyente y muestra la advertencia.
+
+La ubicación se compara con la ubicación del proveedor para identificar entregas no confirmadas. No se inventan tarifas de transporte: un flete excluido o no verificable impide certificar el TCO. En **Revisión** se ven la comparación, la evidencia y las fuentes de mercado. El informe se puede imprimir a PDF desde el navegador y también exportar a CSV. Los proyectos existentes reciben las columnas nuevas al iniciar la app, pero hay que completar manualmente ciudad, estado, presupuesto y referencia BCV antes de evaluarlos.
 
 ### Probar pantallas por rol (Linux/Bash)
 
@@ -206,10 +210,10 @@ Abre `http://127.0.0.1:8000/login`. Crea un proyecto desde el panel, carga un PD
    uvicorn app.main:app --reload
    ```
 
-3. Abre `http://127.0.0.1:8000/login` e inicia sesión como `carga`. En el dashboard crea un proyecto; entra en **Recepción** y carga el PDF base y entre 3 y 20 propuestas. Anota el ID del proyecto en la URL para volver a él con las demás cuentas.
-4. En **Evaluación**, inicia la auditoría y espera a que termine el panel en vivo. Luego abre **Revisión** para ver resultados y evidencia.
+3. Abre `http://127.0.0.1:8000/login` e inicia sesión como `carga`. Al crear el proyecto, ingresa ciudad, estado y presupuesto máximo con impuestos incluidos, eligiendo USD o VES. En **Recepción**, carga el PDF base y entre 3 y 20 propuestas. Anota el ID del proyecto en la URL para volver a él con las demás cuentas.
+4. Cierra sesión, entra como `aprobador` y registra en **Recepción** la tasa BCV (VES por USD), su fecha y fuente oficial. Vuelve a `carga` o `revisor`, abre **Evaluación**, inicia la auditoría y espera a que termine el panel en vivo. Luego abre **Revisión** para ver resultados y evidencia.
 5. Cierra sesión y entra como `revisor`. Abre el mismo proyecto: puede evaluar y registrar dictámenes, pero no verá la creación de proyectos, la carga de archivos ni los controles de tasa BCV y estado.
-6. Cierra sesión y entra como `aprobador`. Además de evaluar y dictaminar, verá los campos de tasa BCV, fecha, fuente y estado.
+6. Cierra sesión y entra como `aprobador`. Además de evaluar y dictaminar, puede actualizar la tasa BCV, fecha, fuente y estado. Cambiar la tasa invalida la comparación anterior y requiere volver a evaluar.
 7. Cierra sesión y entra como `lectura`. Puede consultar proyectos, informes y proveedores, pero no verá botones para crear, cargar, evaluar, dictaminar ni cambiar la tasa/estado.
 
 Los valores `CAMBIA_ESTA_CLAVE` son marcadores: reemplázalos por contraseñas diferentes antes de iniciar. Las acciones también se verifican en el backend; no dependas solo de que un botón esté oculto.
