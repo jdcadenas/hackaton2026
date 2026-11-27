@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Chat · {{ project.title }}{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-3xl">
+  <a href="/project/{{ project.id }}" class="text-sm text-indigo-700">← {{ project.title }}</a>
+  <h1 class="mt-2 text-3xl font-bold">Preguntar a los documentos</h1>
+  <p class="mt-2 text-sm text-slate-600">Las respuestas se limitan a fragmentos recuperados de las propuestas y muestran sus fuentes.</p>
+  <form method="post" class="mt-5 rounded-xl border bg-white p-4">
+    <label for="question" class="text-sm font-medium">Tu pregunta</label>
+    <textarea id="question" required name="question" rows="3" class="mt-2 w-full rounded-lg border p-3">{{ question }}</textarea>
+    <button class="mt-3 rounded-lg bg-indigo-700 px-4 py-2 font-semibold text-white">Consultar</button>
+  </form>
+  {% if answer %}
+  <section class="mt-5 rounded-xl border bg-white p-5"><h2 class="font-semibold">Respuesta</h2><p class="mt-3 whitespace-pre-wrap text-sm leading-6">{{ answer }}</p>
+    <h3 class="mt-5 text-sm font-semibold">Fragmentos fuente</h3>
+    <ul class="mt-2 space-y-2">{% for source in sources %}<li class="rounded-lg bg-slate-50 p-3 text-sm"><strong>{{ source.archivo }}</strong>{% if source.evidencia.pagina %}, pág. {{ source.evidencia.pagina }}{% endif %}<p class="mt-1">{{ source.texto }}</p></li>{% else %}<li class="text-sm text-slate-500">No se recuperaron fragmentos.</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

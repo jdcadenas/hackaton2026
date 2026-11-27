@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Proveedores · Propuesta Servicios{% endblock %}
+{% block content %}
+<h1 class="text-3xl font-bold">Directorio de proveedores</h1>
+<p class="mt-2 text-sm text-slate-600">Alertas basadas únicamente en auditorías previas registradas en este sistema.</p>
+<div class="mt-6 overflow-x-auto rounded-xl border bg-white">
+<table class="w-full min-w-[600px] text-left text-sm">
+  <thead class="bg-slate-100 text-xs uppercase text-slate-600"><tr><th class="p-3">Proveedor</th><th class="p-3">Ubicación</th><th class="p-3">Propuestas</th><th class="p-3">Descartes previos</th></tr></thead>
+  <tbody class="divide-y">{% for supplier in suppliers %}<tr><td class="p-3 font-medium">{{ supplier.name }}</td><td class="p-3">{{ supplier.location or "No indicada" }}</td><td class="p-3">{{ supplier.files|length }}</td><td class="p-3">{% if supplier.discarded %}<span class="rounded-full bg-amber-100 px-2 py-1 text-amber-900">{{ supplier.discarded }} alerta(s)</span>{% else %}Sin descartes registrados{% endif %}</td></tr>{% else %}<tr><td colspan="4" class="p-5 text-slate-500">No hay proveedores con auditorías previas.</td></tr>{% endfor %}</tbody>
+</table>
+</div>
+{% endblock %}

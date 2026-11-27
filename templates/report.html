@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Informe · {{ project.title }}{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-center justify-between gap-3 print:hidden">
+  <div><a href="/project/{{ project.id }}" class="text-sm text-indigo-700">← Proyecto</a><h1 class="mt-2 text-3xl font-bold">Informe de auditoría</h1><p class="text-slate-600">{{ project.title }}</p></div>
+  <div class="flex gap-2"><a href="/project/{{ project.id }}/report.csv" class="rounded-lg border bg-white px-4 py-2">Descargar CSV</a><button onclick="window.print()" class="rounded-lg bg-indigo-700 px-4 py-2 text-white">Imprimir / Guardar PDF</button></div>
+</div>
+<div class="mt-6 space-y-4">
+{% for row in rows %}
+  {% set audit = row.audit %}
+  <article class="break-inside-avoid rounded-xl border bg-white p-5">
+    <div class="flex justify-between gap-4"><h2 class="font-semibold">{{ row.file.original_name }}</h2><span>{{ "Descartada" if audit and audit.descartada else "Evaluada" if audit else "Pendiente" }}</span></div>
+    {% if audit %}<p class="mt-2 text-sm">Proveedor: {{ audit.propuesta.proveedor or "No identificado" }} · Subtotal: {{ audit.propuesta.totales_declarados.subtotal if audit.propuesta.totales_declarados.subtotal is not none else "No declarado" }} USD · TCO: {{ audit.tco.total if audit.tco else "No calculable" }} USD</p>
+    <ul class="mt-3 list-disc pl-5 text-sm">{% for reason in audit.motivos_descarte %}<li>{{ reason }}</li>{% endfor %}</ul>
+    {% if audit.tco %}<details class="mt-3 text-sm"><summary class="cursor-pointer">Desglose TCO</summary><ul class="mt-2">{% for line in audit.tco.desglose %}<li>{{ line.concepto }}: {{ "%.2f"|format(line.monto) }} USD</li>{% endfor %}</ul></details>{% endif %}
+    {% endif %}
+  </article>
+{% else %}<p class="rounded-lg border bg-white p-5">Aún no hay propuestas.</p>{% endfor %}
+</div>
+{% endblock %}

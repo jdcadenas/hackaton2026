@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+pydantic>=2
+sqlalchemy
+google-genai
+openpyxl
+pdfplumber
+pillow
+cryptography
+pytest
+python-dateutil
