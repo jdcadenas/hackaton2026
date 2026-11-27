@@ -232,14 +232,28 @@ def render_markdown(project: Any, report: dict[str, Any]) -> str:
     lines = [
         f"# Informe de análisis y factibilidad financiera — {project.title}",
         "",
-        f"- **Destino:** {project.execution_city or 'No indicado'}, {project.execution_state or 'No indicado'}",
-        f"- **Presupuesto:** {project.budget_amount if project.budget_amount is not None else 'No indicado'} "
-        f"{project.budget_currency or ''} (impuestos incluidos)",
-        f"- **BCV:** {project.bcv_rate or 'No indicada'} VES/USD · {project.bcv_date or '—'} · {project.bcv_source or '—'}",
-        "",
-        "## Propuesta recomendada",
-        "",
     ]
+    evaluation_number = getattr(project, "evaluation_number", None)
+    if evaluation_number is not None:
+        completed_at = getattr(project, "evaluation_completed_at", None)
+        lines.extend(
+            [
+                f"- **Ejecución:** #{evaluation_number}",
+                f"- **Evaluada:** {completed_at.isoformat() if completed_at else 'En curso'}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            f"- **Destino:** {project.execution_city or 'No indicado'}, {project.execution_state or 'No indicado'}",
+            f"- **Presupuesto:** {project.budget_amount if project.budget_amount is not None else 'No indicado'} "
+            f"{project.budget_currency or ''} (impuestos incluidos)",
+            f"- **BCV:** {project.bcv_rate or 'No indicada'} VES/USD · {project.bcv_date or '—'} · {project.bcv_source or '—'}",
+            "",
+            "## Propuesta recomendada",
+            "",
+        ]
+    )
     recommendation = report["recommendation"]
     if recommendation:
         lines.extend(

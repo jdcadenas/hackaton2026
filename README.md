@@ -196,6 +196,12 @@ En **Recepción**, Carga o Aprobador puede registrar por propuesta una cotizaci�
 
 El botón **Evaluar propuestas de servicios** conserva en pantalla los eventos en vivo: lectura y extracción del PDF base y las propuestas, validaciones, componentes del TCO, cotización del flete usada o faltante, búsquedas web por ítem y resultado. El informe presenta una recomendación solo si hay una propuesta con aritmética y alcance conformes, TCO completo y costo dentro del presupuesto; incluye una matriz de montos declarados, conciliación aritmética y TCO ajustado, y dictámenes cuantificados. Las alertas de precios web son indicativas y no causan descarte automático. Se puede imprimir a PDF desde el navegador o descargar como Markdown/CSV. Los proyectos existentes reciben las columnas nuevas al iniciar la app, pero hay que completar manualmente ciudad, estado, presupuesto y referencia BCV antes de evaluarlos.
 
+### Historial y etapas del proceso
+
+El tablero conserva varios proyectos y permite buscarlos o filtrarlos por estado. Cada evaluación nueva crea una ejecución numerada e inmutable con la configuración del proyecto, los requisitos extraídos, las propuestas evaluadas, los resultados y el ranking. En **Revisión** se pueden consultar los informes históricos y descargar cada versión en Markdown/CSV o imprimirla a PDF. Cambiar datos o archivos invalida los resultados actuales y devuelve el proyecto a **Recepción**, pero no elimina ejecuciones anteriores.
+
+El flujo es **Recepción → Evaluación → Revisión → Comité → Adjudicado → Cerrado**. La evaluación lleva automáticamente a Revisión; se requiere registrar el dictamen de cada propuesta para pasar a Comité. El Aprobador debe justificar los cambios de etapa, seleccionar una oferta aceptada y elegible para adjudicar, o cerrar el proceso desde Comité con el motivo de no adjudicación. Para cerrar después de adjudicar también se registra un motivo. Los retrocesos de Adjudicado a Comité y de Comité a Revisión exigen motivo y quedan en la bitácora. Cerrado es terminal y bloquea cambios. Los resultados que existían antes de esta funcionalidad no se pueden reconstruir como ejecuciones históricas; las nuevas ejecuciones sí quedan archivadas.
+
 ### Probar pantallas por rol (Linux/Bash)
 
 1. En `.env`, reemplaza `APP_USERS_JSON` por cuatro cuentas locales. Define contraseñas distintas y no compartas este archivo:

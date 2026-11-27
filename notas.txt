@@ -88,3 +88,11 @@ Presenta recomendación solo si la propuesta cumple aritmética y alcance, tiene
 La matriz compara totales declarados y recalculados, flete, recargos y saldo presupuestario. Distingue el saldo basado en TCO declarado del recalculado.
 Incluye dictámenes por propuesta y alertas de mercado; estas alertas no provocan descarte automático.
 Permite descargar en CSV y Markdown, e imprimir o guardar como PDF desde el navegador.
+Implementé la gestión de proyectos, el historial y el flujo de etapas.
+
+Cada evaluación crea una ejecución numerada que conserva la configuración y tasa BCV, requisitos, propuestas, cotizaciones, auditorías, ranking y una copia Markdown del informe. Se puede consultar el informe anterior y descargar sus exportaciones desde Historial de evaluaciones. Los cambios al proyecto invalidan los resultados actuales, pero no borran las ejecuciones anteriores.
+El flujo ahora es Recepción → Evaluación → Revisión → Comité → Adjudicado/Cerrado. Se exige dictamen para cada propuesta antes de Comité; para adjudicar, la oferta debe estar aceptada y ser elegible; el cierre requiere motivo. Los retrocesos permitidos también requieren justificación y quedan en la bitácora. Cerrado es terminal.
+Agregué migraciones para la base existente y recuperación de evaluaciones interrumpidas al reiniciar.
+Cambios principales: modelo de ejecuciones, persistencia e informes históricos, transiciones, pantalla del proyecto y documentación.
+
+Validación: 60 pruebas pasaron; también validé sintaxis Python y templates. Quedan dos avisos deprecados de FastAPI (on_event), sin fallos de pruebas. Los resultados anteriores a este cambio no se pueden reconstruir como ejecuciones históricas; las nuevas evaluaciones sí quedarán guardadas.

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Informe · {{ project.title }}{% endblock %}
 {% block content %}
+{% set run_query = "?run_id=" ~ report_run.id if report_run else "" %}
 <style>
 @media print {
   .report-detail:not([open]) > *:not(summary) { display: block !important; }
@@ -11,11 +12,14 @@
 <div class="flex flex-wrap items-center justify-between gap-3 print:hidden">
   <div><a href="/project/{{ project.id }}" class="text-sm text-indigo-700">← Proyecto</a><h1 class="mt-2 text-3xl font-bold">Informe de análisis y factibilidad financiera</h1><p class="text-slate-600">{{ project.title }}</p></div>
   <div class="flex flex-wrap gap-2">
-    <a href="/project/{{ project.id }}/report.csv" class="rounded-lg border bg-white px-4 py-2">Descargar CSV</a>
-    <a href="/project/{{ project.id }}/report.md" class="rounded-lg border bg-white px-4 py-2">Descargar Markdown</a>
+    <a href="/project/{{ project.id }}/report.csv{{ run_query }}" class="rounded-lg border bg-white px-4 py-2">Descargar CSV</a>
+    <a href="/project/{{ project.id }}/report.md{{ run_query }}" class="rounded-lg border bg-white px-4 py-2">Descargar Markdown</a>
     <button onclick="window.print()" class="rounded-lg bg-indigo-700 px-4 py-2 text-white">Imprimir / Guardar PDF</button>
   </div>
 </div>
+{% if report_run %}
+<p class="mt-4 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-900">Informe histórico inmutable · Ejecución #{{ report_run.run_number }} · Inicio: {{ report_run.started_at }} · Finalización: {{ report_run.completed_at }}</p>
+{% endif %}
 <div class="mt-6 space-y-5">
   <section class="rounded-xl border bg-white p-5">
     <h2 class="text-lg font-semibold">Base de factibilidad</h2>

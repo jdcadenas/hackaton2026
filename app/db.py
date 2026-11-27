@@ -4,7 +4,19 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Generator
 
-from sqlalchemy import DateTime, Float, ForeignKey, Numeric, String, Text, create_engine, inspect, text
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -37,8 +49,15 @@ class Project(Base):
     bcv_date: Mapped[str | None] = mapped_column(String(30), nullable=True)
     bcv_source: Mapped[str | None] = mapped_column(String(300), nullable=True)
     requirements_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    awarded_proposal_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    adjudication_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    closure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     files: Mapped[list["ProjectFile"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     audit_events: Mapped[list["AuditEvent"]] = relationship(back_populates="project")
+    evaluation_runs: Mapped[list["EvaluationRun"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 class ProjectFile(Base):
@@ -75,6 +94,29 @@ class AuditEvent(Base):
     project: Mapped[Project] = relationship(back_populates="audit_events")
 
 
+class EvaluationRun(Base):
+    __tablename__ = "evaluation_runs"
+    __table_args__ = (
+        UniqueConstraint("project_id", "run_number", name="uq_evaluation_run_project_number"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    run_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    project_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    requirements_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    results_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ranking_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    report_markdown: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    project: Mapped[Project] = relationship(back_populates="evaluation_runs")
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     additions = {
@@ -83,6 +125,10 @@ def init_db() -> None:
         "budget_amount": "NUMERIC(18, 2)",
         "budget_currency": "VARCHAR(3)",
         "requirements_json": "TEXT",
+        "awarded_proposal_id": "VARCHAR(36)",
+        "adjudication_reason": "TEXT",
+        "closure_reason": "TEXT",
+        "closed_at": "TIMESTAMP",
     }
     with engine.begin() as connection:
         existing = {column["name"] for column in inspect(connection).get_columns("projects")}
@@ -100,6 +146,9 @@ def init_db() -> None:
         for column, sql_type in file_additions.items():
             if column not in file_columns:
                 connection.execute(text(f"ALTER TABLE project_files ADD COLUMN {column} {sql_type}"))
+        run_columns = {column["name"] for column in inspect(connection).get_columns("evaluation_runs")}
+        if "report_markdown" not in run_columns:
+            connection.execute(text("ALTER TABLE evaluation_runs ADD COLUMN report_markdown TEXT"))
 
 
 def get_db() -> Generator:

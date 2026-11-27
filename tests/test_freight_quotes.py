@@ -86,3 +86,13 @@ def test_init_db_adds_freight_quote_fields_to_legacy_schema(monkeypatch):
         "freight_quote_date",
         "freight_quote_source",
     } <= names
+    project_names = {column["name"] for column in db_module.inspect(engine).get_columns("projects")}
+    assert {
+        "awarded_proposal_id",
+        "adjudication_reason",
+        "closure_reason",
+        "closed_at",
+    } <= project_names
+    assert "evaluation_runs" in db_module.inspect(engine).get_table_names()
+    run_columns = {column["name"] for column in db_module.inspect(engine).get_columns("evaluation_runs")}
+    assert {"results_json", "project_snapshot_json", "report_markdown"} <= run_columns
