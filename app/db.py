@@ -56,6 +56,10 @@ class ProjectFile(Base):
     audit_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     review_decision: Mapped[str | None] = mapped_column(String(30), nullable=True)
     review_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    freight_quote_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    freight_quote_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    freight_quote_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    freight_quote_source: Mapped[str | None] = mapped_column(String(500), nullable=True)
     project: Mapped[Project] = relationship(back_populates="files")
 
 
@@ -86,8 +90,16 @@ def init_db() -> None:
             if column not in existing:
                 connection.execute(text(f"ALTER TABLE projects ADD COLUMN {column} {sql_type}"))
         file_columns = {column["name"] for column in inspect(connection).get_columns("project_files")}
-        if "uploaded_at" not in file_columns:
-            connection.execute(text("ALTER TABLE project_files ADD COLUMN uploaded_at TIMESTAMP"))
+        file_additions = {
+            "uploaded_at": "TIMESTAMP",
+            "freight_quote_amount": "NUMERIC(18, 2)",
+            "freight_quote_currency": "VARCHAR(3)",
+            "freight_quote_date": "VARCHAR(10)",
+            "freight_quote_source": "VARCHAR(500)",
+        }
+        for column, sql_type in file_additions.items():
+            if column not in file_columns:
+                connection.execute(text(f"ALTER TABLE project_files ADD COLUMN {column} {sql_type}"))
 
 
 def get_db() -> Generator:

@@ -344,6 +344,17 @@ async def upload_project_files(
     filenames = [Path(upload.filename or "").name for upload in proposals]
     if len({name.casefold() for name in filenames}) != len(filenames):
         raise HTTPException(status_code=400, detail="Los nombres de archivo de las propuestas deben ser únicos.")
+    existing_names = {
+        name.casefold()
+        for name in db.scalars(
+            select(ProjectFile.original_name).where(
+                ProjectFile.project_id == project_id,
+                ProjectFile.kind == "propuesta",
+            )
+        )
+    }
+    if any(name.casefold() in existing_names for name in filenames):
+        raise HTTPException(status_code=409, detail="Ya existe una propuesta con uno de esos nombres en este proyecto.")
     if any(Path(name).suffix.lower() not in ALLOWED_PROPOSAL_EXTENSIONS for name in filenames):
         raise HTTPException(status_code=400, detail="Las propuestas deben ser PDF, JPG, PNG o XLSX.")
 
@@ -372,6 +383,69 @@ async def upload_project_files(
     return RedirectResponse(f"/project/{project_id}?tab=recepcion", status_code=303)
 
 
+@app.post("/project/{project_id}/proposal/{file_id}/freight-quote")
+def save_freight_quote(
+    request: Request,
+    project_id: str,
+    file_id: str,
+    amount: str = Form(""),
+    currency: str = Form(""),
+    quote_date: str = Form(""),
+    source: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = _user(request)
+    _require_role(user, "Carga", "Aprobador")
+    project = _project_or_404(db, project_id)
+    if project.status == "Evaluación":
+        raise HTTPException(status_code=409, detail="No se pueden cambiar cotizaciones durante una evaluación.")
+    record = db.get(ProjectFile, file_id)
+    if not record or record.project_id != project_id or record.kind != "propuesta":
+        raise HTTPException(status_code=404, detail="Propuesta no encontrada.")
+
+    raw_amount, quote_currency = amount.strip(), currency.strip().upper()
+    quote_date, quote_source = quote_date.strip(), source.strip()
+    if not any((raw_amount, quote_currency, quote_date, quote_source)):
+        record.freight_quote_amount = None
+        record.freight_quote_currency = None
+        record.freight_quote_date = None
+        record.freight_quote_source = None
+    else:
+        try:
+            parsed_amount = Decimal(raw_amount)
+        except (InvalidOperation, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="El monto del flete debe ser numérico.") from exc
+        if not parsed_amount.is_finite() or parsed_amount < 0 or parsed_amount > Decimal("9999999999999999.99"):
+            raise HTTPException(status_code=400, detail="El monto del flete debe ser válido y no negativo.")
+        if parsed_amount.quantize(Decimal("0.01")) != parsed_amount:
+            raise HTTPException(status_code=400, detail="El monto del flete admite hasta dos decimales.")
+        if quote_currency not in SUPPORTED_CURRENCIES:
+            raise HTTPException(status_code=400, detail="La moneda de la cotización debe ser USD o VES.")
+        if not _valid_bcv_date(quote_date):
+            raise HTTPException(status_code=400, detail="La fecha de cotización debe ser ISO y no futura.")
+        if not quote_source or len(quote_source) > 500:
+            raise HTTPException(status_code=400, detail="Indica la fuente de la cotización (máximo 500 caracteres).")
+        record.freight_quote_amount = parsed_amount
+        record.freight_quote_currency = quote_currency
+        record.freight_quote_date = quote_date
+        record.freight_quote_source = quote_source
+
+    _invalidate_evaluations(db, project)
+    _audit(
+        db,
+        project_id,
+        user,
+        "cotizacion_flete_actualizada",
+        f"{record.original_name}: " + (
+            "cotización eliminada."
+            if record.freight_quote_amount is None
+            else f"{record.freight_quote_amount} {record.freight_quote_currency}; {record.freight_quote_date}; {record.freight_quote_source}"
+        ),
+    )
+    db.commit()
+    return RedirectResponse(f"/project/{project_id}?tab=recepcion", status_code=303)
+
+
 def _evaluate(project_id: str, progress) -> None:
     db = SessionLocal()
     try:
@@ -391,23 +465,40 @@ def _evaluate(project_id: str, progress) -> None:
             raise RuntimeError("Carga el PDF de requerimientos antes de evaluar.")
         with tempfile.TemporaryDirectory(prefix="propuesta-lote-") as temp_dir:
             project_pdf = Path(temp_dir) / project_document.original_name
+            progress("lectura", f"Descifrando documento base: {project_document.original_name}")
             project_pdf.write_bytes(
                 decrypt_bytes(
                     (DATA_DIR / project_document.relative_path).read_bytes(),
                     project_document.id.encode("utf-8"),
                 )
             )
+            progress("extraccion", f"Extrayendo requisitos del documento base: {project_document.original_name}")
             project_requirements = extract_project_requirements(str(project_pdf))
             project.requirements_json = project_requirements.model_dump_json()
             db.commit()
+            progress(
+                "extraccion",
+                f"Documento base procesado: {len(project_requirements.requisitos)} requisito(s) extraído(s).",
+            )
+            for warning in project_requirements.advertencias:
+                progress("advertencia", f"Extracción del documento base: {warning}")
             proposal_dir = Path(temp_dir) / "propuestas"
             proposal_dir.mkdir()
-            for record in records:
+            freight_quotes = {}
+            for index, record in enumerate(records, start=1):
+                progress("lectura", f"Descifrando propuesta {index}/{len(records)}: {record.original_name}")
                 plain = decrypt_bytes(
                     (DATA_DIR / record.relative_path).read_bytes(),
                     record.id.encode("utf-8"),
                 )
                 (proposal_dir / record.original_name).write_bytes(plain)
+                if record.freight_quote_amount is not None:
+                    freight_quotes[record.original_name] = {
+                        "amount": str(record.freight_quote_amount),
+                        "currency": record.freight_quote_currency,
+                        "date": record.freight_quote_date,
+                        "source": record.freight_quote_source,
+                    }
             context = {
                 "execution_city": project.execution_city,
                 "execution_state": project.execution_state,
@@ -417,11 +508,13 @@ def _evaluate(project_id: str, progress) -> None:
                 "bcv_date": project.bcv_date,
                 "bcv_source": project.bcv_source,
             }
+            progress("preparacion", f"Se prepararon {len(records)} propuesta(s) para evaluación.")
             audits, ranking = run_pipeline(
                 temp_dir,
                 progress=progress,
                 project_context=context,
                 project_requirements=project_requirements,
+                freight_quotes=freight_quotes,
             )
         by_name = {audit.propuesta.archivo: audit for audit in audits}
         for record in records:
@@ -507,7 +600,7 @@ async def evaluate_stream(request: Request, project_id: str, db: Session = Depen
                         )
                     )
                     error_db.commit()
-            events.put(("error", {"message": f"La evaluación falló: {exc}"}))
+            events.put(("failure", {"stage": "error", "message": f"La evaluación falló: {exc}"}))
         finally:
             events.put((None, None))
 

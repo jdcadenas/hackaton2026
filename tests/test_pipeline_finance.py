@@ -37,7 +37,7 @@ def test_pipeline_persists_bcv_budget_and_market_comparisons(tmp_path, monkeypat
         ],
         clausulas=[
             Clausula(
-                texto="Flete incluido en Caracas",
+                texto="No incluye flete",
                 categoria=ClausulaCategoria.flete,
                 evidencia=evidence,
             )
@@ -75,20 +75,35 @@ def test_pipeline_persists_bcv_budget_and_market_comparisons(tmp_path, monkeypat
         "bcv_date": "2026-11-27",
         "bcv_source": "BCV",
     }
+    trace = []
 
     audits, _ = run_pipeline(
         str(tmp_path),
+        progress=lambda stage, message: trace.append((stage, message)),
         project_context=context,
         project_requirements=requirements,
+        freight_quotes={
+            "oferta.pdf": {
+                "amount": "25",
+                "currency": "USD",
+                "date": "2026-11-27",
+                "source": "Cotización Transportes",
+            }
+        },
     )
 
     audit = audits[0]
     assert audit.factibilidad_financiera.estado == "dentro_presupuesto"
-    assert audit.factibilidad_financiera.tco_usd == 139.2
+    assert audit.factibilidad_financiera.tco_usd == 164.2
+    assert audit.tco.flete == 25
     assert audit.factibilidad_financiera.tasa_bcv_ves_por_usd == 50
     assert audit.precios_mercado[0].estado == "sobre_rango_observado"
     assert len(audit.precios_mercado[0].fuentes) == 3
     assert audit.alcance_estado == "cumple"
+    assert {"extraccion", "validacion", "tco", "mercado", "completado"} <= {
+        stage for stage, _ in trace
+    }
+    assert any("Cotización Transportes" in message and "25.00 USD" in message for _, message in trace)
 
 
 def test_pipeline_does_not_discard_on_low_confidence_project_requirements(tmp_path, monkeypatch):

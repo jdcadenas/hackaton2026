@@ -65,5 +65,22 @@ La limitación principal
 Aunque se ejecuta la búsqueda, el resultado se descarta después de recibirlo: pipeline.py no lo guarda, no lo muestra en el informe y no compara el rango de mercado con precio_unitario de la oferta. Por tanto, hoy el sistema no detecta ni marca sobreprecios automáticamente, y la búsqueda no modifica el ranking. Este último se basa en descarte, puntuación técnica y TCO en agent/ranker.py.
 
 En resumen: está implementada la consulta de precios de referencia, pero falta conectarla con la comparación de la oferta. Para cumplir toda la sección habría que conservar los resultados con sus fuentes y fecha, compararlos con el precio unitario ofertado y presentar la diferencia —con cautela cuando los productos o condiciones no sean equivalentes— en el informe.
+punto 2 de la interfaz
+Parcialmente. Si seleccionas las propuestas juntas en una sola carga, la interfaz permite subir de 3 a 20 archivos. El selector admite PDF, JPG/JPEG, PNG y XLSX —interpreto «XI.»SX» como XLSX—; el servidor también valida esos formatos y el número de archivos.
 
+Pero hay un detalle: el límite se aplica a cada envío, no al total ya cargado en el proyecto. Si haces varias cargas, podrías superar 20 propuestas; entonces no podrías iniciar la evaluación, que sí exige un total de entre 3 y 20.
+
+La selección múltiple está en project.html y las validaciones están en main.py. Por eso, cumple cuando se cargan todas las propuestas en un solo envío, pero no garantiza el límite total si se realizan cargas adicionales.
+
+Implementé los cambios:
+
+El botón ahora dice “Evaluar propuestas de servicios”. Al pulsarlo, la pantalla muestra y conserva la trazabilidad durante la ejecución: lectura y extracción del PDF base y las propuestas, validaciones, desglose del TCO, búsquedas web por ítem y resultado. Si falla la ejecución, muestra el error.
+En Recepción, los roles Carga y Aprobador pueden registrar para cada propuesta el monto final del flete, su moneda, fecha y fuente. El sistema lo convierte con la tasa BCV y lo incorpora al TCO. Si la propuesta ya indica que el flete está incluido, evita duplicarlo.
+Los recargos porcentuales muestran la base y el monto calculado: se usa el total de factura cuando la cláusula lo especifica; en caso contrario, el subtotal.
+Si falta una cotización de transporte o no se confirma que el flete esté incluido, el agente lo indica y no inventa un costo; la factibilidad queda no concluyente.
+El flujo se implementó en main.py, pipeline.py, tco.py y project.html. La base existente recibe las nuevas columnas al iniciar la aplicación.
+
+Nota: la tarifa del flete se registra desde una cotización provista por el usuario; no se integró un servicio externo de transporte que cotice rutas automáticamente.
+
+Verificación: 47 tests pasan, compilación Python correcta y plantillas Jinja válidas. No hice consultas reales a Gemini o a Google Search durante las pruebas
 

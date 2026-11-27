@@ -42,6 +42,7 @@ def run_pipeline(
     progress: Optional[ProgressCallback] = None,
     project_context: Optional[dict] = None,
     project_requirements: Optional[ProjectRequirements] = None,
+    freight_quotes: Optional[dict[str, dict]] = None,
 ) -> Tuple[List[ResultadoAuditoria], List[str]]:
     files = _proposal_files(lote_dir)
     audits: List[ResultadoAuditoria] = []
@@ -80,22 +81,27 @@ def run_pipeline(
         scope_status = "no_concluyente"
         scope_warnings: list[str] = []
         if not reasons:
-            report("validacion", f"Validando aritmética, alcance y compatibilidad: {filename}")
-            validators = [validate_arithmetic]
-            if project_requirements is None:
-                validators.append(validate_scope)
-            validators.append(validate_compatibility)
-            for validator in validators:
+            validators = [
+                ("Aritmética", validate_arithmetic),
+                *(
+                    [("Alcance estándar", validate_scope)]
+                    if project_requirements is None
+                    else []
+                ),
+                ("Compatibilidad", validate_compatibility),
+            ]
+            for label, validator in validators:
+                report("validacion", f"Validando {label.lower()}: {filename}")
                 if validator is validate_scope:
                     is_valid, validator_reasons = validate_scope(proposal)
                     scope_status = "cumple" if is_valid else "incompleto"
-                elif validator is validate_arithmetic:
-                    is_valid, validator_reasons = validate_arithmetic(proposal)
                 else:
-                    is_valid, validator_reasons = validate_compatibility(proposal)
+                    is_valid, validator_reasons = validator(proposal)
                 if not is_valid:
                     reasons.extend(validator_reasons)
+                    report("advertencia", f"{label} requiere atención en {filename}: {'; '.join(validator_reasons)}")
                     break
+                report("validacion", f"{label} validada: {filename}")
 
             if project_requirements is not None:
                 if not project_requirements.requisitos:
@@ -112,20 +118,27 @@ def run_pipeline(
                         "La extracción de uno o más requisitos no tiene página o confianza suficiente; "
                         "el alcance requiere revisión humana."
                     ]
+                    report("advertencia", f"Alcance requiere revisión manual en {filename}: {'; '.join(scope_warnings)}")
                 else:
+                    report("validacion", f"Comparando la propuesta con los requisitos del proyecto: {filename}")
                     is_valid, scope_warnings = validate_scope(proposal, project_requirements)
                     scope_status = "cumple" if is_valid else "incompleto"
                     if not is_valid:
                         reasons.extend(scope_warnings)
+                        report("advertencia", f"Alcance incompleto en {filename}: {'; '.join(scope_warnings)}")
+                    else:
+                        report("validacion", f"Alcance del proyecto validado: {filename}")
         elif project_requirements is not None:
             scope_warnings = project_requirements.advertencias or [
                 "No se verificó el alcance porque falló una validación previa."
             ]
+            report("advertencia", f"Alcance no verificado en {filename}: {'; '.join(scope_warnings)}")
 
         discarded = bool(reasons)
         tco = None
         if proposal.totales_declarados.subtotal is not None:
             try:
+                report("tco", f"Calculando total de propiedad (TCO): {filename}")
                 destination = None
                 if project_context:
                     destination = ", ".join(
@@ -134,10 +147,25 @@ def run_pipeline(
                             project_context.get("execution_state"),
                         ) if value
                     )
-                tco = calculate_tco(proposal, destination=destination)
+                tco = calculate_tco(
+                    proposal,
+                    destination=destination,
+                    freight_quote=(freight_quotes or {}).get(filename),
+                    bcv_rate=project_context.get("bcv_rate") if project_context else None,
+                )
+                for component in tco.desglose:
+                    report(
+                        "tco",
+                        f"{filename}: {component.concepto} = {component.monto:.2f} {tco.moneda or 'moneda no identificada'}",
+                    )
+                for warning in tco.advertencias:
+                    report("advertencia", f"{filename}: {warning}")
             except ValueError as exc:
                 reasons.append(str(exc))
                 discarded = True
+                report("advertencia", f"No se pudo calcular el TCO de {filename}: {exc}")
+        else:
+            report("advertencia", f"No se calculó el TCO de {filename}: falta el subtotal declarado.")
 
         score = 0.0 if discarded else 100.0
         financial_assessment = None
@@ -157,6 +185,7 @@ def run_pipeline(
             report("mercado", f"Consultando precios con Google Search: {filename}")
             for item in proposal.items:
                 if item.descripcion.strip():
+                    report("mercado", f"Buscando precio de referencia para «{item.descripcion}» en {filename}")
                     research = research_market_price(item.descripcion, api_key=api_key)
                     proposed_usd = to_usd(
                         item.precio_unitario,
@@ -192,6 +221,13 @@ def run_pipeline(
                             ],
                         )
                     )
+                    report(
+                        "mercado",
+                        f"Búsqueda de «{item.descripcion}» finalizada: {len(prices)} referencia(s), "
+                        f"estado {market_status.replace('_', ' ')}.",
+                    )
+        else:
+            report("mercado", f"Se omitió la búsqueda de mercado para {filename} porque la propuesta fue descartada.")
         report("completado", f"Auditoría terminada: {filename}")
         audits.append(
             ResultadoAuditoria(
