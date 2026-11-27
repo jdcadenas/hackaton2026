@@ -1,1 +1,7 @@
-# Agent package for propuesta_servicios
+"""Agent package for propuesta_servicios."""
+
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")

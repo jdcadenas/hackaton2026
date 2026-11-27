@@ -1,0 +1,69 @@
+Actualmente la ingesta funciona así:
+
+Recepción web: se carga un PDF base y entre 3 y 20 propuestas. El PDF base es obligatorio; las propuestas pueden ser PDF, JPG/JPEG, PNG o XLSX. La aplicación limita cada archivo a 50 MB. Los archivos se guardan cifrados y, durante la evaluación, se descifran temporalmente para procesarlos. La carga está implementada en app/main.py.
+
+Lectura según formato:
+
+PDF: pdfplumber extrae texto para una comprobación previa; después se envía el PDF a Gemini para estructurar su contenido.
+JPG/PNG: la imagen se envía directamente a Gemini, que extrae el texto y los datos visuales.
+XLSX: openpyxl lee la hoja activa localmente, sin Gemini. Busca columnas como descripción y cantidad, además de precios y totales. No requiere clave Gemini.
+La lógica está en agent/extractor.py. Para PDF e imágenes sí se necesita GEMINI_API_KEY.
+
+Estructura común y auditoría: sin importar el formato, los datos se convierten a una estructura común —proveedor, ítems, cláusulas, totales y evidencia— definida en agent/schemas.py. Luego el flujo ejecuta validaciones aritméticas, de alcance y compatibilidad, calcula costos y puede consultar precios de mercado; eso lo coordina agent/pipeline.py.
+
+Límite actual: no hay conectores para Word, CSV, páginas web, correo, Drive o bases de datos. Para añadirlos, lo recomendable es crear un lector específico por fuente que convierta su contenido a la misma estructura común y conserve evidencia de origen. Por ejemplo: un lector de DOCX, un importador CSV o un conector a una API.
+
+
+-----
+Esta sección pide que el sistema compare lo que realmente costaría cumplir la compra, no solo el total impreso por el proveedor.
+
+1. Cláusulas y TCO
+El TCO (costo total de propiedad) intenta sumar el precio base y los costos adicionales, como flete, recargos e impuestos. En el código actual, agent/tco.py:
+
+Usa el subtotal declarado como base.
+Busca cláusulas que indiquen que el flete no está incluido.
+Si encuentra un recargo expresado como porcentaje, calcula ese porcentaje sobre el subtotal.
+Añade IVA del 16 % y produce un desglose.
+El resultado se usa para ordenar las propuestas válidas: menor TCO primero, según agent/ranker.py.
+Ejemplo: subtotal de $1.000, recargo de 50 % y flete de referencia de $580: el recargo sería $500; luego se sumaría el IVA al monto con adicionales.
+
+Límite importante: actualmente el flete de Maracaibo a Caracas está fijado en $580 dentro del código; no se cotiza ni se verifica automáticamente. Si falta la ubicación, el TCO marca el flete como no cuantificado, pero lo suma como cero. Por eso ese valor no debe tomarse como una cotización real. Además, el porcentaje se calcula sobre el subtotal, no necesariamente sobre el “total de factura” que mencione una cláusula.
+
+2. Verificación aritmética
+agent/validators/arithmetic.py calcula con Python:
+
+Cantidad × precio unitario y lo compara con el subtotal de cada ítem.
+La suma de los subtotales y la compara con el subtotal declarado.
+Subtotal + impuestos y lo compara con el total declarado.
+Acepta diferencias de hasta $0,01 para tolerar redondeos. Si faltan datos o hay una discrepancia mayor, la propuesta se marca para descarte. Es cálculo programado y repetible; no depende de que Gemini haga bien las operaciones.
+
+3. Cumplimiento del alcance
+La intención es verificar que cada oferta incluya lo solicitado en el proyecto. Pero la implementación actual de agent/validators/scope.py no compara todos los requisitos contra el PDF base. Busca requisitos predefinidos: al menos 11 equipos de cómputo, una UPS y periféricos. Si no los detecta, marca la propuesta como incompleta.
+
+¿Qué significa aquí “razonamiento agéntico”?
+Actualmente es un flujo combinado: Gemini ayuda a extraer información y cláusulas de documentos; después, funciones Python aplican reglas y cálculos determinísticos en agent/pipeline.py. No es todavía un agente que compruebe por sí solo cualquier cláusula o requisito del PDF.
+
+En resumen, ya hay extracción de cláusulas, cálculo de recargos, TCO y validaciones aritméticas; el flete y el alcance aún usan reglas simplificadas, así que conviene revisar la evidencia y los supuestos antes de tomar una decisión real de compra.
+
+Llama a la búsqueda para cada ítem de una propuesta que pasó las validaciones. En agent/pipeline.py, se envía la descripción del ítem a research_market_price. Las propuestas que ya fueron descartadas no llegan a esta búsqueda.
+
+Busca en la web y devuelve un precio de referencia, que se compara con el precio unitario declarado. Si hay una diferencia mayor al 20 %, se marca la propuesta como “precio fuera de mercado”. La búsqueda no es exhaustiva ni garantiza que el precio encontrado sea el más bajo; solo sirve para alertar sobre posibles inconsistencias. 
+
+Qué busca esta sección
+La idea es contrastar el precio de cada producto ofertado con precios publicados en Internet. Así se podría advertir, por ejemplo, que una propuesta está muy por encima del mercado. Para que la comparación sea justa, habría que comparar productos realmente equivalentes —modelo, especificaciones, moneda, región, impuestos y condiciones de entrega— y mostrar las fuentes.
+
+Qué hace hoy el código
+Llama a la búsqueda para cada ítem de una propuesta que pasó las validaciones. En agent/pipeline.py, se envía la descripción del ítem a research_market_price. Las propuestas que ya fueron descartadas no llegan a esta búsqueda.
+
+Busca mediante Gemini con Google Search Grounding. agent/market/search_grounding.py pide precios verificables en USD y URLs; no hace scraping directo de páginas con un navegador. La respuesta se valida con un esquema que espera una lista de precios, URLs y fechas.
+
+Calcula un rango y guarda una caché diaria. Si encuentra precios, calcula el mínimo y el máximo. Asigna una confianza heurística: 0.8 con tres o más resultados y 0.4 con menos. Guarda el resultado en caché por descripción del componente y fecha de Caracas, para evitar repetir la misma búsqueda ese día.
+
+Si no hay clave o falla la consulta, devuelve un resultado vacío con confianza baja; el fallo se registra en el log.
+
+La limitación principal
+Aunque se ejecuta la búsqueda, el resultado se descarta después de recibirlo: pipeline.py no lo guarda, no lo muestra en el informe y no compara el rango de mercado con precio_unitario de la oferta. Por tanto, hoy el sistema no detecta ni marca sobreprecios automáticamente, y la búsqueda no modifica el ranking. Este último se basa en descarte, puntuación técnica y TCO en agent/ranker.py.
+
+En resumen: está implementada la consulta de precios de referencia, pero falta conectarla con la comparación de la oferta. Para cumplir toda la sección habría que conservar los resultados con sus fuentes y fecha, compararlos con el precio unitario ofertado y presentar la diferencia —con cautela cuando los productos o condiciones no sean equivalentes— en el informe.
+
+

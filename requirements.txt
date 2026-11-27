@@ -11,3 +11,4 @@ pillow
 cryptography
 pytest
 python-dateutil
+python-dotenv
