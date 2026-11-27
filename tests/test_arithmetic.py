@@ -1,4 +1,4 @@
-from agent.validators.arithmetic import validate_arithmetic
+from agent.validators.arithmetic import analyze_arithmetic, validate_arithmetic
 from tests.conftest import evidencia, propuesta
 from agent.schemas import Item
 
@@ -14,6 +14,20 @@ def test_arithmetic_rejects_bad_item_total():
     valid, reasons = validate_arithmetic(offer)
     assert not valid
     assert any("no coincide con cantidad" in reason for reason in reasons)
+
+
+def test_arithmetic_analysis_exposes_recalculated_amounts_and_deltas():
+    offer = propuesta(items=[Item(
+        descripcion="Equipo", cantidad=2, unidad="u", precio_unitario=10, subtotal=19, evidencia=evidencia()
+    )], subtotal=19, impuestos=0, total=19)
+
+    result = analyze_arithmetic(offer)
+
+    assert result.estado == "discrepancia"
+    assert result.subtotal_items_calculado == 20
+    assert result.diferencia_subtotal == 1
+    assert result.total_recalculado == 20
+    assert result.diferencia_total == 1
 
 
 def test_arithmetic_rejects_declared_sum_mismatch():

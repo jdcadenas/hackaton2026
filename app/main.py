@@ -28,6 +28,7 @@ from agent.schemas import ProjectRequirements
 from app.auth import COOKIE_NAME, authenticate, create_session, current_user
 from app.crypto import decrypt_bytes, encrypt_bytes
 from app.db import AuditEvent, DATA_DIR, Project, ProjectFile, SessionLocal, get_db, init_db
+from app.financial_report import build_financial_report, render_markdown
 
 
 LOGGER = logging.getLogger(__name__)
@@ -700,7 +701,7 @@ def report_page(request: Request, project_id: str, db: Session = Depends(get_db)
     records = db.scalars(
         select(ProjectFile).where(ProjectFile.project_id == project_id, ProjectFile.kind == "propuesta")
     ).all()
-    rows = [{"file": record, "audit": _load_audit(record)} for record in records]
+    report_data = build_financial_report(records)
     requirements = (
         ProjectRequirements.model_validate_json(project.requirements_json)
         if project.requirements_json
@@ -709,7 +710,30 @@ def report_page(request: Request, project_id: str, db: Session = Depends(get_db)
     return templates.TemplateResponse(
         request=request,
         name="report.html",
-        context={"user": user, "project": project, "rows": rows, "requirements": requirements},
+        context={
+            "user": user,
+            "project": project,
+            "rows": report_data["rows"],
+            "recommendation": report_data["recommendation"],
+            "recommendation_missing": report_data["recommendation_missing"],
+            "requirements": requirements,
+        },
+    )
+
+
+@app.get("/project/{project_id}/report.md")
+def report_markdown(request: Request, project_id: str, db: Session = Depends(get_db)):
+    if not _user(request):
+        return RedirectResponse("/login", status_code=303)
+    project = _project_or_404(db, project_id)
+    records = db.scalars(
+        select(ProjectFile).where(ProjectFile.project_id == project_id, ProjectFile.kind == "propuesta")
+    ).all()
+    report_data = build_financial_report(records)
+    return PlainTextResponse(
+        render_markdown(project, report_data),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="informe-{project_id}.md"'},
     )
 
 
@@ -721,6 +745,8 @@ def report_csv(request: Request, project_id: str, db: Session = Depends(get_db))
     records = db.scalars(
         select(ProjectFile).where(ProjectFile.project_id == project_id, ProjectFile.kind == "propuesta")
     ).all()
+    report_data = build_financial_report(records)
+    report_rows = {row["file"].id: row for row in report_data["rows"]}
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer)
     writer.writerow([
@@ -731,12 +757,22 @@ def report_csv(request: Request, project_id: str, db: Session = Depends(get_db))
         "moneda_presupuesto",
         "presupuesto_usd",
         "archivo",
+        "puesto",
         "proveedor",
         "moneda_propuesta",
         "descartada",
         "subtotal_declarado",
+        "subtotal_items_recalculado",
+        "diferencia_subtotal_aritmetica",
+        "total_recalculado",
+        "diferencia_total_aritmetica",
         "tco_propuesta",
-        "tco_usd",
+        "flete",
+        "recargos",
+        "tco_recalculado",
+        "tco_recalculado_usd",
+        "tco_declarado_usd",
+        "diferencia_presupuesto_recalculada_usd",
         "factibilidad",
         "diferencia_presupuesto_usd",
         "tasa_bcv_ves_por_usd",
@@ -744,8 +780,9 @@ def report_csv(request: Request, project_id: str, db: Session = Depends(get_db))
         "fuente_bcv",
         "alcance",
         "precios_mercado_json",
-        "dictamen",
-        "motivos",
+        "dictamen_humano",
+        "dictamen_analisis",
+        "motivos_descarte",
     ])
     for record in records:
         audit = _load_audit(record) or {}
@@ -753,6 +790,9 @@ def report_csv(request: Request, project_id: str, db: Session = Depends(get_db))
         totals = proposal.get("totales_declarados", {})
         tco = audit.get("tco") or {}
         financial = audit.get("factibilidad_financiera") or {}
+        report_row = report_rows.get(record.id, {})
+        arithmetic = report_row.get("aritmetica") or {}
+        recalculated_tco = report_row.get("tco_recalculado") or {}
         writer.writerow([
             project.title,
             project.execution_city or "",
@@ -761,12 +801,22 @@ def report_csv(request: Request, project_id: str, db: Session = Depends(get_db))
             project.budget_currency or "",
             financial.get("presupuesto_usd", ""),
             record.original_name,
+            report_row.get("posicion", ""),
             proposal.get("proveedor") or "",
             proposal.get("moneda") or "",
             audit.get("descartada", ""),
             totals.get("subtotal") if totals.get("subtotal") is not None else "",
+            arithmetic.get("subtotal_items_calculado", ""),
+            arithmetic.get("diferencia_subtotal", ""),
+            arithmetic.get("total_recalculado", ""),
+            arithmetic.get("diferencia_total", ""),
             tco.get("total", ""),
+            tco.get("flete", ""),
+            tco.get("recargos", ""),
+            recalculated_tco.get("total", ""),
+            recalculated_tco.get("usd", ""),
             financial.get("tco_usd", ""),
+            recalculated_tco.get("diferencia_presupuesto_usd", ""),
             financial.get("estado", ""),
             financial.get("diferencia_usd", ""),
             project.bcv_rate or "",
@@ -775,6 +825,7 @@ def report_csv(request: Request, project_id: str, db: Session = Depends(get_db))
             audit.get("alcance_estado", ""),
             json.dumps(audit.get("precios_mercado", []), ensure_ascii=False),
             record.review_decision or "",
+            report_row.get("dictamen", ""),
             " | ".join(audit.get("motivos_descarte", [])),
         ])
     return StreamingResponse(

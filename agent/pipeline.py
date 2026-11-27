@@ -13,7 +13,7 @@ from agent.schemas import (
     ResultadoAuditoria,
 )
 from agent.tco import calculate_tco
-from agent.validators.arithmetic import validate_arithmetic
+from agent.validators.arithmetic import analyze_arithmetic, validate_arithmetic
 from agent.validators.compatibility import validate_compatibility
 from agent.validators.injection import check_injection
 from agent.validators.scope import validate_scope
@@ -65,6 +65,7 @@ def run_pipeline(
         proposal.archivo = filename
 
         reasons: list[str] = []
+        arithmetic_assessment = analyze_arithmetic(proposal)
         extraction_failed = bool(proposal.anomalias_ingesta)
         if extraction_failed:
             reasons.extend(proposal.anomalias_ingesta)
@@ -95,6 +96,9 @@ def run_pipeline(
                 if validator is validate_scope:
                     is_valid, validator_reasons = validate_scope(proposal)
                     scope_status = "cumple" if is_valid else "incompleto"
+                elif validator is validate_arithmetic:
+                    is_valid = arithmetic_assessment.estado == "cumple"
+                    validator_reasons = arithmetic_assessment.motivos
                 else:
                     is_valid, validator_reasons = validator(proposal)
                 if not is_valid:
@@ -201,13 +205,21 @@ def run_pipeline(
                         market_status = "datos_insuficientes"
                     elif proposed_usd > max(price.precio_usd for price in prices):
                         market_status = "sobre_rango_observado"
+                    elif proposed_usd > sum(price.precio_usd for price in prices) / len(prices):
+                        market_status = "sobre_promedio_observado"
                     else:
                         market_status = "en_rango_o_menor"
+                    average_price = (
+                        sum(price.precio_usd for price in prices) / len(prices)
+                        if prices
+                        else None
+                    )
                     market_reviews.append(
                         MarketPriceReview(
                             componente=item.descripcion,
                             precio_ofertado_usd=float(proposed_usd) if proposed_usd is not None else None,
                             minimo_mercado_usd=min((price.precio_usd for price in prices), default=None),
+                            promedio_mercado_usd=average_price,
                             maximo_mercado_usd=max((price.precio_usd for price in prices), default=None),
                             confianza=research.confianza,
                             estado=market_status,
@@ -234,6 +246,7 @@ def run_pipeline(
                 propuesta=proposal,
                 descartada=discarded,
                 motivos_descarte=reasons,
+                aritmetica=arithmetic_assessment,
                 tco=tco,
                 factibilidad_financiera=financial_assessment,
                 precios_mercado=market_reviews,

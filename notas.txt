@@ -84,3 +84,7 @@ Nota: la tarifa del flete se registra desde una cotización provista por el usua
 
 Verificación: 47 tests pasan, compilación Python correcta y plantillas Jinja válidas. No hice consultas reales a Gemini o a Google Search durante las pruebas
 
+Presenta recomendación solo si la propuesta cumple aritmética y alcance, tiene TCO completo y está dentro del presupuesto.
+La matriz compara totales declarados y recalculados, flete, recargos y saldo presupuestario. Distingue el saldo basado en TCO declarado del recalculado.
+Incluye dictámenes por propuesta y alertas de mercado; estas alertas no provocan descarte automático.
+Permite descargar en CSV y Markdown, e imprimir o guardar como PDF desde el navegador.

@@ -62,6 +62,18 @@ class TotalesDeclarados(BaseModel):
     total: Optional[float] = None
 
 
+class ArithmeticAssessment(BaseModel):
+    estado: Literal["cumple", "discrepancia", "incompleto"]
+    subtotal_items_calculado: Optional[float] = None
+    subtotal_items_declarado: Optional[float] = None
+    subtotal_declarado: Optional[float] = None
+    diferencia_subtotal: Optional[float] = None
+    total_recalculado: Optional[float] = None
+    total_declarado: Optional[float] = None
+    diferencia_total: Optional[float] = None
+    motivos: list[str] = Field(default_factory=list)
+
+
 class PropuestaExtraida(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -104,10 +116,12 @@ class MarketPriceReview(BaseModel):
     componente: str
     precio_ofertado_usd: Optional[float] = None
     minimo_mercado_usd: Optional[float] = None
+    promedio_mercado_usd: Optional[float] = None
     maximo_mercado_usd: Optional[float] = None
     confianza: float = Field(ge=0, le=1)
     estado: Literal[
         "sobre_rango_observado",
+        "sobre_promedio_observado",
         "en_rango_o_menor",
         "datos_insuficientes",
         "sin_datos",
@@ -151,6 +165,7 @@ class ResultadoAuditoria(BaseModel):
     propuesta: PropuestaExtraida
     descartada: bool = False
     motivos_descarte: list[str] = Field(default_factory=list)
+    aritmetica: Optional[ArithmeticAssessment] = None
     tco: Optional[TCO] = None
     factibilidad_financiera: Optional[FinancialAssessment] = None
     precios_mercado: list[MarketPriceReview] = Field(default_factory=list)

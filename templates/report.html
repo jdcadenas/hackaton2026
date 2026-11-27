@@ -1,54 +1,115 @@
 {% extends "base.html" %}
 {% block title %}Informe · {{ project.title }}{% endblock %}
 {% block content %}
+<style>
+@media print {
+  .report-detail:not([open]) > *:not(summary) { display: block !important; }
+  .report-detail > summary { display: none; }
+  .report-detail { break-inside: avoid; }
+}
+</style>
 <div class="flex flex-wrap items-center justify-between gap-3 print:hidden">
-  <div><a href="/project/{{ project.id }}" class="text-sm text-indigo-700">← Proyecto</a><h1 class="mt-2 text-3xl font-bold">Informe de factibilidad</h1><p class="text-slate-600">{{ project.title }}</p></div>
-  <div class="flex gap-2"><a href="/project/{{ project.id }}/report.csv" class="rounded-lg border bg-white px-4 py-2">Descargar CSV</a><button onclick="window.print()" class="rounded-lg bg-indigo-700 px-4 py-2 text-white">Imprimir / Guardar PDF</button></div>
+  <div><a href="/project/{{ project.id }}" class="text-sm text-indigo-700">← Proyecto</a><h1 class="mt-2 text-3xl font-bold">Informe de análisis y factibilidad financiera</h1><p class="text-slate-600">{{ project.title }}</p></div>
+  <div class="flex flex-wrap gap-2">
+    <a href="/project/{{ project.id }}/report.csv" class="rounded-lg border bg-white px-4 py-2">Descargar CSV</a>
+    <a href="/project/{{ project.id }}/report.md" class="rounded-lg border bg-white px-4 py-2">Descargar Markdown</a>
+    <button onclick="window.print()" class="rounded-lg bg-indigo-700 px-4 py-2 text-white">Imprimir / Guardar PDF</button>
+  </div>
 </div>
-<div class="mt-6 space-y-4">
-<section class="rounded-xl border bg-white p-5">
-  <h2 class="text-lg font-semibold">Base de factibilidad</h2>
-  <p class="mt-2 text-sm">Destino: {{ project.execution_city or "No indicado" }}, {{ project.execution_state or "No indicado" }}</p>
-  <p class="text-sm">Presupuesto máximo, impuestos incluidos: {{ "%.2f"|format(project.budget_amount) if project.budget_amount is not none else "No indicado" }} {{ project.budget_currency or "" }}</p>
-  <p class="text-sm">Referencia cambiaria: {{ project.bcv_rate or "No indicada" }} VES/USD · {{ project.bcv_date or "" }} · {{ project.bcv_source or "" }}</p>
-  <p class="mt-1 text-xs text-slate-500">Las conversiones comparativas se expresan principalmente en USD. La tasa BCV, fecha y fuente se conservan como referencia auditable.</p>
-  {% if requirements %}
-  <details class="mt-3 text-sm"><summary class="cursor-pointer text-indigo-700">Requerimientos extraídos del PDF</summary>
-    {% if requirements.requisitos %}<ul class="mt-2 list-disc space-y-1 pl-5">{% for requirement in requirements.requisitos %}<li>{{ requirement.descripcion }}{% if requirement.cantidad is not none %} — {{ requirement.cantidad }} {{ requirement.unidad or "" }}{% endif %}{% if requirement.evidencia.pagina %} · pág. {{ requirement.evidencia.pagina }}{% endif %}</li>{% endfor %}</ul>{% else %}<p class="mt-2 text-amber-800">No hay requisitos extraídos; el alcance no puede certificarse automáticamente.</p>{% endif %}
-    {% for warning in requirements.advertencias %}<p class="mt-2 text-amber-800">{{ warning }}</p>{% endfor %}
-  </details>
-  {% endif %}
-</section>
-{% for row in rows %}
-  {% set audit = row.audit %}
-  {% set requiere_revision = audit and (audit.alcance_estado != "cumple" or (audit.factibilidad_financiera and audit.factibilidad_financiera.estado == "no_concluyente")) %}
-  <article class="break-inside-avoid rounded-xl border bg-white p-5">
-    <div class="flex justify-between gap-4"><h2 class="font-semibold">{{ row.file.original_name }}</h2><span>{{ "Descartada" if audit and audit.descartada else "Revisión manual" if requiere_revision else "Evaluada" if audit else "Pendiente" }}</span></div>
+<div class="mt-6 space-y-5">
+  <section class="rounded-xl border bg-white p-5">
+    <h2 class="text-lg font-semibold">Base de factibilidad</h2>
+    <p class="mt-2 text-sm">Destino: {{ project.execution_city or "No indicado" }}, {{ project.execution_state or "No indicado" }}</p>
+    <p class="text-sm">Presupuesto máximo, impuestos incluidos: {{ "%.2f"|format(project.budget_amount) if project.budget_amount is not none else "No indicado" }} {{ project.budget_currency or "" }}</p>
+    <p class="text-sm">Referencia cambiaria: {{ project.bcv_rate or "No indicada" }} VES/USD · {{ project.bcv_date or "" }} · {{ project.bcv_source or "" }}</p>
+    <p class="mt-1 text-xs text-slate-500">Las conversiones comparativas se expresan principalmente en USD. La tasa BCV, fecha y fuente se conservan como referencia auditable.</p>
+    <p class="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">Las diferencias aritméticas se presentan como conciliación; no se modifica silenciosamente la oferta original. Las alertas web son indicativas, dependen de la comparabilidad de los productos y no provocan descarte automático.</p>
+    {% if requirements %}
+    <details class="report-detail mt-3 text-sm"><summary class="cursor-pointer text-indigo-700">Requerimientos extraídos del PDF</summary>
+      {% if requirements.requisitos %}<ul class="mt-2 list-disc space-y-1 pl-5">{% for requirement in requirements.requisitos %}<li>{{ requirement.descripcion }}{% if requirement.cantidad is not none %} — {{ requirement.cantidad }} {{ requirement.unidad or "" }}{% endif %}{% if requirement.evidencia.pagina %} · pág. {{ requirement.evidencia.pagina }}{% endif %}</li>{% endfor %}</ul>{% else %}<p class="mt-2 text-amber-800">No hay requisitos extraídos; el alcance no puede certificarse automáticamente.</p>{% endif %}
+      {% for warning in requirements.advertencias %}<p class="mt-2 text-amber-800">{{ warning }}</p>{% endfor %}
+    </details>
+    {% endif %}
+  </section>
+
+  <section class="rounded-xl border bg-white p-5">
+    {% if recommendation %}
+    <h2 class="text-lg font-semibold">Propuesta recomendada: {{ recommendation.archivo }}</h2>
+    <p class="mt-1 text-sm text-slate-600">Proveedor: {{ recommendation.proveedor }}</p>
+    <p class="mt-3">{{ recommendation.justificacion }}</p>
+    <p class="mt-2 text-sm">TCO ajustado: <strong>{{ "%.2f"|format(recommendation.tco_usd) }} USD</strong> · Saldo presupuestario (TCO declarado ajustado): <strong>{{ "%.2f"|format(recommendation.diferencia_usd) if recommendation.diferencia_usd is not none else "No calculable" }} USD</strong></p>
+    {% for alert in recommendation.advertencias %}<p class="mt-2 rounded bg-amber-50 p-2 text-sm text-amber-900">Alerta de mercado — {{ alert.componente }}: {{ "%.1f"|format(alert.sobreprecio_pct) }}% sobre el promedio observado ({{ "%.2f"|format(alert.promedio_usd) }} USD). Requiere revisión de equivalencia y fuentes.</p>{% endfor %}
+    {% else %}
+    <h2 class="text-lg font-semibold">Sin propuesta recomendada</h2>
+    <p class="mt-2 text-sm text-amber-900">Ninguna propuesta reúne simultáneamente alcance completo, validación aritmética, TCO completo y factibilidad dentro del presupuesto. Revisa los dictámenes antes de decidir.</p>
+    {% endif %}
+  </section>
+
+  <section class="overflow-x-auto rounded-xl border bg-white p-5">
+    <h2 class="mb-3 text-lg font-semibold">Matriz comparativa</h2>
+    <table class="w-full min-w-[1600px] border-collapse text-left text-xs">
+      <thead class="bg-slate-100 uppercase text-slate-600"><tr>
+        <th class="p-2">Puesto</th><th class="p-2">Propuesta</th><th class="p-2">Subtotal declarado</th><th class="p-2">Total declarado</th><th class="p-2">Subtotal recalculado</th><th class="p-2">Δ subtotal</th><th class="p-2">Total recalculado</th><th class="p-2">Flete</th><th class="p-2">Recargos</th><th class="p-2">TCO ajustado (base declarada)</th><th class="p-2">TCO recalculado USD</th><th class="p-2">Saldo recalculado USD</th><th class="p-2">Saldo TCO declarado USD</th><th class="p-2">Alcance</th><th class="p-2">Dictamen</th>
+      </tr></thead>
+      <tbody class="divide-y">
+      {% for row in rows %}
+        {% set audit = row.audit %}
+        {% set totals = audit.propuesta.totales_declarados if audit else none %}
+        {% set arithmetic = row.aritmetica %}
+        {% set financial = audit.factibilidad_financiera if audit else none %}
+        {% set tco = audit.tco if audit else none %}
+        {% set recalculated_tco = row.tco_recalculado %}
+        <tr class="align-top {% if row.recomendada %}bg-emerald-50{% endif %}">
+          <td class="p-2">{{ row.posicion or "—" }}</td>
+          <td class="p-2 font-medium">{{ row.file.original_name }}{% if row.recomendada %}<strong class="block text-emerald-800">RECOMENDADA</strong>{% endif %}</td>
+          <td class="p-2">{{ "%.2f"|format(totals.subtotal) if totals and totals.subtotal is not none else "—" }} {{ audit.propuesta.moneda if audit else "" }}</td>
+          <td class="p-2">{{ "%.2f"|format(totals.total) if totals and totals.total is not none else "—" }} {{ audit.propuesta.moneda if audit else "" }}</td>
+          <td class="p-2">{{ "%.2f"|format(arithmetic.subtotal_items_calculado) if arithmetic and arithmetic.subtotal_items_calculado is not none else "—" }} {{ audit.propuesta.moneda if audit else "" }}</td>
+          <td class="p-2">{{ "%.2f"|format(arithmetic.diferencia_subtotal) if arithmetic and arithmetic.diferencia_subtotal is not none else "—" }} {{ audit.propuesta.moneda if audit else "" }}</td>
+          <td class="p-2">{{ "%.2f"|format(arithmetic.total_recalculado) if arithmetic and arithmetic.total_recalculado is not none else "—" }} {{ audit.propuesta.moneda if audit else "" }}</td>
+          <td class="p-2">{{ "%.2f"|format(tco.flete) if tco else "—" }} {{ tco.moneda if tco else "" }}</td>
+          <td class="p-2">{{ "%.2f"|format(tco.recargos) if tco else "—" }} {{ tco.moneda if tco else "" }}</td>
+          <td class="p-2">{{ "%.2f"|format(tco.total) if tco else "—" }} {{ tco.moneda if tco else "" }}</td>
+          <td class="p-2">{{ "%.2f"|format(recalculated_tco.usd) if recalculated_tco and recalculated_tco.usd is not none else "—" }} USD</td>
+          <td class="p-2">{{ "%.2f"|format(recalculated_tco.diferencia_presupuesto_usd) if recalculated_tco and recalculated_tco.diferencia_presupuesto_usd is not none else "—" }} USD</td>
+          <td class="p-2">{{ "%.2f"|format(financial.diferencia_usd) if financial and financial.diferencia_usd is not none else "—" }} USD</td>
+          <td class="p-2">{{ audit.alcance_estado|replace("_", " ") if audit else "Pendiente" }}</td>
+          <td class="min-w-72 p-2">{{ row.dictamen }}</td>
+        </tr>
+      {% else %}<tr><td colspan="15" class="p-4 text-slate-500">Aún no hay propuestas.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {% for row in rows %}
+    {% set audit = row.audit %}
+    {% set arithmetic = row.aritmetica %}
     {% if audit %}
-    <p class="mt-2 text-sm">Proveedor: {{ audit.propuesta.proveedor or "No identificado" }} · Moneda propuesta: {{ audit.propuesta.moneda or "No identificada" }} · Subtotal declarado: {{ audit.propuesta.totales_declarados.subtotal if audit.propuesta.totales_declarados.subtotal is not none else "No declarado" }}</p>
-    <p class="text-sm">Alcance: {{ audit.alcance_estado|replace("_", " ")|capitalize }}</p>
-    <ul class="mt-3 list-disc pl-5 text-sm">{% for reason in audit.motivos_descarte %}<li>{{ reason }}</li>{% endfor %}</ul>
-    {% if audit.alcance_advertencias %}<ul class="mt-2 list-disc pl-5 text-sm text-amber-800">{% for warning in audit.alcance_advertencias %}<li>{{ warning }}</li>{% endfor %}</ul>{% endif %}
-    {% if audit.tco %}<details class="mt-3 text-sm"><summary class="cursor-pointer">Desglose TCO</summary><ul class="mt-2">{% for line in audit.tco.desglose %}<li>{{ line.concepto }}: {{ "%.2f"|format(line.monto) }} {{ audit.tco.moneda or audit.propuesta.moneda or "" }}</li>{% endfor %}</ul>{% for warning in audit.tco.advertencias %}<p class="mt-1 text-amber-800">{{ warning }}</p>{% endfor %}</details>{% endif %}
-    {% if audit.factibilidad_financiera %}
-    <div class="mt-3 rounded-lg border p-3 text-sm">
-      <strong>Factibilidad:</strong> {{ audit.factibilidad_financiera.estado|replace("_", " ")|capitalize }}
-      <p>TCO comparativo: {{ "%.2f"|format(audit.factibilidad_financiera.tco_usd) if audit.factibilidad_financiera.tco_usd is not none else "No calculable" }} USD</p>
-      <p>Presupuesto equivalente: {{ "%.2f"|format(audit.factibilidad_financiera.presupuesto_usd) if audit.factibilidad_financiera.presupuesto_usd is not none else "No calculable" }} USD</p>
-      <p>Diferencia disponible (presupuesto − TCO): {{ "%.2f"|format(audit.factibilidad_financiera.diferencia_usd) if audit.factibilidad_financiera.diferencia_usd is not none else "No concluyente" }} USD</p>
-      <p>Equivalente del TCO: {{ "%.2f"|format(audit.factibilidad_financiera.tco_ves) if audit.factibilidad_financiera.tco_ves is not none else "No calculable" }} VES</p>
-      <p class="text-xs text-slate-600">BCV: {{ audit.factibilidad_financiera.tasa_bcv_ves_por_usd }} VES/USD · {{ audit.factibilidad_financiera.tasa_bcv_fecha }} · {{ audit.factibilidad_financiera.tasa_bcv_fuente }}</p>
-      {% for warning in audit.factibilidad_financiera.advertencias %}<p class="mt-1 text-amber-800">{{ warning }}</p>{% endfor %}
-    </div>
+    <article class="break-inside-avoid rounded-xl border bg-white p-5">
+      <div class="flex justify-between gap-4"><h2 class="font-semibold">{{ row.posicion or "—" }}. {{ row.file.original_name }}</h2><span>{{ "Descartada" if audit.descartada else "Revisión manual" if audit.factibilidad_financiera and audit.factibilidad_financiera.estado == "no_concluyente" or audit.alcance_estado != "cumple" else "Evaluada" }}</span></div>
+      <p class="mt-2 text-sm">Proveedor: {{ audit.propuesta.proveedor or "No identificado" }} · Moneda propuesta: {{ audit.propuesta.moneda or "No identificada" }}</p>
+      <p class="mt-2 text-sm"><strong>Dictamen:</strong> {{ row.dictamen }}</p>
+      {% if audit.motivos_descarte %}<ul class="mt-2 list-disc pl-5 text-sm">{% for reason in audit.motivos_descarte %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}
+      {% if arithmetic and arithmetic.motivos %}<details class="report-detail mt-3 text-sm"><summary class="cursor-pointer">Conciliación aritmética: {{ arithmetic.estado }}</summary><ul class="mt-2 list-disc pl-5">{% for reason in arithmetic.motivos %}<li>{{ reason }}</li>{% endfor %}</ul></details>{% endif %}
+      {% if audit.alcance_advertencias %}<ul class="mt-2 list-disc pl-5 text-sm text-amber-800">{% for warning in audit.alcance_advertencias %}<li>{{ warning }}</li>{% endfor %}</ul>{% endif %}
+      {% if audit.tco %}<details class="report-detail mt-3 text-sm"><summary class="cursor-pointer">Desglose TCO</summary><ul class="mt-2">{% for line in audit.tco.desglose %}<li>{{ line.concepto }}: {{ "%.2f"|format(line.monto) }} {{ audit.tco.moneda or audit.propuesta.moneda or "" }}</li>{% endfor %}</ul>{% for warning in audit.tco.advertencias %}<p class="mt-1 text-amber-800">{{ warning }}</p>{% endfor %}</details>{% endif %}
+      {% if audit.factibilidad_financiera %}
+      <div class="mt-3 rounded-lg border p-3 text-sm">
+        <strong>Factibilidad:</strong> {{ audit.factibilidad_financiera.estado|replace("_", " ")|capitalize }}
+        <p>Presupuesto equivalente: {{ "%.2f"|format(audit.factibilidad_financiera.presupuesto_usd) if audit.factibilidad_financiera.presupuesto_usd is not none else "No calculable" }} USD</p>
+        <p>Diferencia disponible (presupuesto − TCO): {{ "%.2f"|format(audit.factibilidad_financiera.diferencia_usd) if audit.factibilidad_financiera.diferencia_usd is not none else "No concluyente" }} USD</p>
+        <p class="text-xs text-slate-600">BCV: {{ audit.factibilidad_financiera.tasa_bcv_ves_por_usd }} VES/USD · {{ audit.factibilidad_financiera.tasa_bcv_fecha }} · {{ audit.factibilidad_financiera.tasa_bcv_fuente }}</p>
+        {% for warning in audit.factibilidad_financiera.advertencias %}<p class="mt-1 text-amber-800">{{ warning }}</p>{% endfor %}
+      </div>
+      {% endif %}
+      {% if audit.precios_mercado %}<details class="report-detail mt-3 text-sm"><summary class="cursor-pointer">Contraste de precios de mercado</summary>
+        {% for market in audit.precios_mercado %}<div class="mt-2 border-t pt-2"><p><strong>{{ market.componente }}</strong> · {{ market.estado|replace("_", " ")|capitalize }}</p>
+          <p>Oferta: {{ "%.2f"|format(market.precio_ofertado_usd) if market.precio_ofertado_usd is not none else "No comparable" }} USD · Promedio observado: {{ "%.2f"|format(market.promedio_mercado_usd) if market.promedio_mercado_usd is not none else "Sin datos" }} USD · Rango: {% if market.minimo_mercado_usd is not none %}{{ "%.2f"|format(market.minimo_mercado_usd) }}–{{ "%.2f"|format(market.maximo_mercado_usd) }} USD{% else %}Sin datos verificables{% endif %} · confianza {{ market.confianza }}</p>
+          <ul class="list-disc pl-5">{% for source in market.fuentes %}<li><a class="text-indigo-700 underline" href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.url }}</a> — {{ source.precio_usd }} USD ({{ source.fecha_consulta }})</li>{% endfor %}</ul>
+        </div>{% endfor %}
+      </details>{% endif %}
+    </article>
     {% endif %}
-    {% if audit.precios_mercado %}<details class="mt-3 text-sm"><summary class="cursor-pointer">Contraste de precios de mercado</summary>
-      {% for market in audit.precios_mercado %}<div class="mt-2 border-t pt-2"><p><strong>{{ market.componente }}</strong> · {{ market.estado|replace("_", " ")|capitalize }}</p>
-        <p>Oferta: {{ "%.2f"|format(market.precio_ofertado_usd) if market.precio_ofertado_usd is not none else "No comparable" }} USD · Rango observado: {% if market.minimo_mercado_usd is not none %}{{ "%.2f"|format(market.minimo_mercado_usd) }}–{{ "%.2f"|format(market.maximo_mercado_usd) }} USD{% else %}Sin datos verificables{% endif %} · confianza {{ market.confianza }}</p>
-        <ul class="list-disc pl-5">{% for source in market.fuentes %}<li><a class="text-indigo-700 underline" href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.url }}</a> — {{ source.precio_usd }} USD ({{ source.fecha_consulta }})</li>{% endfor %}</ul>
-      </div>{% endfor %}
-    </details>{% endif %}
-    {% endif %}
-  </article>
-{% else %}<p class="rounded-lg border bg-white p-5">Aún no hay propuestas.</p>{% endfor %}
+  {% endfor %}
 </div>
 {% endblock %}

@@ -25,6 +25,7 @@ def rank_audits(audits: List[ResultadoAuditoria]) -> List[str]:
         assessment = audit.factibilidad_financiera
         return (
             audit.alcance_estado != "cumple"
+            or (audit.aritmetica is not None and audit.aritmetica.estado != "cumple")
             or (assessment is not None and assessment.estado == "no_concluyente")
         )
 
@@ -35,8 +36,8 @@ def rank_audits(audits: List[ResultadoAuditoria]) -> List[str]:
             audit.factibilidad_financiera.estado == "sobre_presupuesto"
             if audit.factibilidad_financiera
             else False,
-            -audit.technical_score,
             comparable_cost(audit),
+            -audit.technical_score,
             audit.propuesta.archivo,
         )
     )
