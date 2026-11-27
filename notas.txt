@@ -1,6 +1,8 @@
 Actualmente la ingesta funciona así:
 
-Recepción web: se carga un PDF base y entre 3 y 20 propuestas. El PDF base es obligatorio; las propuestas pueden ser PDF, JPG/JPEG, PNG o XLSX. La aplicación limita cada archivo a 50 MB. Los archivos se guardan cifrados y, durante la evaluación, se descifran temporalmente para procesarlos. La carga está implementada en app/main.py.
+Recepción web: se carga un PDF base y entre 3 y 20 propuestas. El PDF base es obligatorio; las propuestas pueden ser PDF, JPG/JPEG, PNG o XLSX. 
+La aplicación limita cada archivo a 50 MB. Los archivos se guardan cifrados y, durante la evaluación, 
+se descifran temporalmente para procesarlos. La carga está implementada en app/main.py.
 
 Lectura según formato:
 
@@ -11,7 +13,9 @@ La lógica está en agent/extractor.py. Para PDF e imágenes sí se necesita GEM
 
 Estructura común y auditoría: sin importar el formato, los datos se convierten a una estructura común —proveedor, ítems, cláusulas, totales y evidencia— definida en agent/schemas.py. Luego el flujo ejecuta validaciones aritméticas, de alcance y compatibilidad, calcula costos y puede consultar precios de mercado; eso lo coordina agent/pipeline.py.
 
-Límite actual: no hay conectores para Word, CSV, páginas web, correo, Drive o bases de datos. Para añadirlos, lo recomendable es crear un lector específico por fuente que convierta su contenido a la misma estructura común y conserve evidencia de origen. Por ejemplo: un lector de DOCX, un importador CSV o un conector a una API.
+Límite actual: no hay conectores para Word, CSV, páginas web, correo, Drive o bases de datos. Para añadirlos, lo recomendable es crear un lector específico por 
+fuente que convierta su contenido a la misma estructura común y conserve evidencia de origen. Por ejemplo: 
+un lector de DOCX, un importador CSV o un conector a una API.
 
 
 -----
@@ -38,7 +42,10 @@ Subtotal + impuestos y lo compara con el total declarado.
 Acepta diferencias de hasta $0,01 para tolerar redondeos. Si faltan datos o hay una discrepancia mayor, la propuesta se marca para descarte. Es cálculo programado y repetible; no depende de que Gemini haga bien las operaciones.
 
 3. Cumplimiento del alcance
-La intención es verificar que cada oferta incluya lo solicitado en el proyecto. Pero la implementación actual de agent/validators/scope.py no compara todos los requisitos contra el PDF base. Busca requisitos predefinidos: al menos 11 equipos de cómputo, una UPS y periféricos. Si no los detecta, marca la propuesta como incompleta.
+La intención es verificar que cada oferta incluya lo solicitado en el proyecto. Pero la implementación actual de agent/validators/scope.py 
+no compara todos los requisitos contra el PDF base.
+ Busca requisitos predefinidos: al menos 11 equipos de cómputo, una UPS y periféricos. 
+ Si no los detecta, marca la propuesta como incompleta.
 
 ¿Qué significa aquí “razonamiento agéntico”?
 Actualmente es un flujo combinado: Gemini ayuda a extraer información y cláusulas de documentos; después, funciones Python aplican reglas y cálculos determinísticos en agent/pipeline.py. No es todavía un agente que compruebe por sí solo cualquier cláusula o requisito del PDF.
@@ -53,7 +60,8 @@ Qué busca esta sección
 La idea es contrastar el precio de cada producto ofertado con precios publicados en Internet. Así se podría advertir, por ejemplo, que una propuesta está muy por encima del mercado. Para que la comparación sea justa, habría que comparar productos realmente equivalentes —modelo, especificaciones, moneda, región, impuestos y condiciones de entrega— y mostrar las fuentes.
 
 Qué hace hoy el código
-Llama a la búsqueda para cada ítem de una propuesta que pasó las validaciones. En agent/pipeline.py, se envía la descripción del ítem a research_market_price. Las propuestas que ya fueron descartadas no llegan a esta búsqueda.
+Llama a la búsqueda para cada ítem de una propuesta que pasó las validaciones. 
+En agent/pipeline.py, se envía la descripción del ítem a research_market_price. Las propuestas que ya fueron descartadas no llegan a esta búsqueda.
 
 Busca mediante Gemini con Google Search Grounding. agent/market/search_grounding.py pide precios verificables en USD y URLs; no hace scraping directo de páginas con un navegador. La respuesta se valida con un esquema que espera una lista de precios, URLs y fechas.
 
@@ -68,7 +76,9 @@ En resumen: está implementada la consulta de precios de referencia, pero falta 
 punto 2 de la interfaz
 Parcialmente. Si seleccionas las propuestas juntas en una sola carga, la interfaz permite subir de 3 a 20 archivos. El selector admite PDF, JPG/JPEG, PNG y XLSX —interpreto «XI.»SX» como XLSX—; el servidor también valida esos formatos y el número de archivos.
 
-Pero hay un detalle: el límite se aplica a cada envío, no al total ya cargado en el proyecto. Si haces varias cargas, podrías superar 20 propuestas; entonces no podrías iniciar la evaluación, que sí exige un total de entre 3 y 20.
+Pero hay un detalle: el límite se aplica a cada envío, no al total ya cargado en el proyecto. 
+Si haces varias cargas, podrías superar 20 propuestas; entonces no podrías iniciar la evaluación, 
+que sí exige un total de entre 3 y 20.
 
 La selección múltiple está en project.html y las validaciones están en main.py. Por eso, cumple cuando se cargan todas las propuestas en un solo envío, pero no garantiza el límite total si se realizan cargas adicionales.
 

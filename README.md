@@ -10,7 +10,7 @@ Aplicación para recibir y auditar propuestas de adquisición de equipos, con un
 
 No hay cuentas ni contraseñas predeterminadas en el proyecto: los usuarios se crean mediante `APP_USERS_JSON`.
 
-El proyecto usa `gemini-3.8-flash`: Google devolvió `404 NOT_FOUND` para `gemini-2.5-flash` en una cuenta nueva y recomendó este modelo.
+El proyecto usa `gemini-flash-latest`, modelo que se verificó respondiendo correctamente con la clave local el 27 de noviembre de 2026. La selección puede cambiar si Google modifica el acceso o la disponibilidad de modelos.
 
 ## Instalación y configuración
 
@@ -96,7 +96,7 @@ from google import genai
 
 with genai.Client() as client:
     response = client.models.generate_content(
-        model="gemini-3.8-flash",
+        model="gemini-flash-latest",
         contents="Responde solo OK",
     )
     print(response.text)
@@ -129,7 +129,7 @@ from google import genai
 
 with genai.Client() as client:
     response = client.models.generate_content(
-        model="gemini-3.8-flash",
+        model="gemini-flash-latest",
         contents="Responde solo OK",
     )
     print(response.text)

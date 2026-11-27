@@ -29,8 +29,8 @@ def test_project_pdf_extraction_uses_schema_and_preserves_page_evidence(tmp_path
             return False
 
         def generate_content(self, **kwargs):
-            assert kwargs["model"] == "gemini-3.8-flash"
-            assert kwargs["config"].response_schema is ProjectRequirements
+            assert kwargs["model"] == "gemini-flash-latest"
+            assert kwargs["config"].response_json_schema == ProjectRequirements.model_json_schema()
             return SimpleNamespace(text=expected.model_dump_json())
 
     monkeypatch.setattr("agent.project_requirements.genai.Client", lambda **_kwargs: FakeClient())
