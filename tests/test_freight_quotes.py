@@ -74,6 +74,17 @@ def test_init_db_adds_freight_quote_fields_to_legacy_schema(monkeypatch):
             "relative_path VARCHAR(500), kind VARCHAR(20), quality VARCHAR(20), audit_json TEXT, "
             "review_decision VARCHAR(30), review_comment TEXT)"
         )
+        connection.exec_driver_sql("INSERT INTO projects (id, title) VALUES ('project-legacy', 'Compra')")
+        connection.exec_driver_sql(
+            "INSERT INTO project_files "
+            "(id, project_id, original_name, relative_path, kind, quality, audit_json) "
+            "VALUES ('proposal-legacy', 'project-legacy', 'oferta.pdf', 'oferta.enc', 'propuesta', 'verde', '{}')"
+        )
+        connection.exec_driver_sql(
+            "INSERT INTO project_files "
+            "(id, project_id, original_name, relative_path, kind, quality) "
+            "VALUES ('proposal-pending', 'project-legacy', 'nueva.pdf', 'nueva.enc', 'propuesta', 'verde')"
+        )
     monkeypatch.setattr(db_module, "engine", engine)
 
     db_module.init_db()
@@ -85,7 +96,18 @@ def test_init_db_adds_freight_quote_fields_to_legacy_schema(monkeypatch):
         "freight_quote_currency",
         "freight_quote_date",
         "freight_quote_source",
+        "evaluation_status",
     } <= names
+    with engine.connect() as connection:
+        statuses = dict(
+            connection.exec_driver_sql(
+                "SELECT id, evaluation_status FROM project_files"
+            ).all()
+        )
+    assert statuses == {
+        "proposal-legacy": "COMPLETADO",
+        "proposal-pending": "PENDIENTE",
+    }
     project_names = {column["name"] for column in db_module.inspect(engine).get_columns("projects")}
     assert {
         "awarded_proposal_id",

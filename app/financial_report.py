@@ -3,6 +3,7 @@ from typing import Any
 from agent.finance import to_usd
 from agent.ranker import rank_audits
 from agent.schemas import ResultadoAuditoria
+from agent.status import EstadoDocumento
 from agent.validators.arithmetic import analyze_arithmetic
 
 
@@ -22,7 +23,8 @@ def build_financial_report(records: list[Any]) -> dict[str, Any]:
         arithmetic = audit.aritmetica or analyze_arithmetic(audit.propuesta)
         financial = audit.factibilidad_financiera
         return bool(
-            not audit.descartada
+            audit.estado_documento == EstadoDocumento.COMPLETADO
+            and not audit.descartada
             and arithmetic.estado == "cumple"
             and audit.alcance_estado == "cumple"
             and audit.tco
@@ -103,7 +105,10 @@ def build_financial_report(records: list[Any]) -> dict[str, Any]:
         "rows": report_rows,
         "recommendation": recommendation,
         "ranking": ranking,
-        "evaluated_count": len(audited),
+        "evaluated_count": sum(
+            audit.estado_documento == EstadoDocumento.COMPLETADO
+            for _, audit in audited
+        ),
         "proposal_count": len(records),
         "recommendation_missing": recommended is None,
     }
@@ -179,6 +184,12 @@ def _decision(
     arithmetic_status: str,
     market_alerts: list[dict[str, Any]],
 ) -> str:
+    if audit.estado_documento == EstadoDocumento.ERROR_API_503:
+        return "No verificada: error temporal 503 de Gemini; puede reintentarse."
+    if audit.estado_documento == EstadoDocumento.NO_VERIFICADO:
+        return "No verificada: el documento no pudo procesarse."
+    if audit.estado_documento == EstadoDocumento.PENDIENTE:
+        return "Pendiente de evaluación."
     if audit.descartada:
         base = "Descartada por validaciones: " + "; ".join(audit.motivos_descarte)
     elif arithmetic_status != "cumple":

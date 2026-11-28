@@ -8,6 +8,7 @@ import openpyxl
 from google import genai
 from google.genai import types
 
+from agent.errors import format_gemini_error
 from agent.schemas import (
     Clausula,
     ClausulaCategoria,
@@ -17,6 +18,7 @@ from agent.schemas import (
     PropuestaExtraida,
     TotalesDeclarados,
 )
+from agent.status import EstadoDocumento
 from agent.validators.injection import check_injection
 
 
@@ -36,11 +38,25 @@ _CLAUSE_TERMS = {
 }
 
 
-def _failure(filename: str, source: FuenteEnum, message: str) -> PropuestaExtraida:
-    return PropuestaExtraida(
+def _failure(
+    filename: str,
+    source: FuenteEnum,
+    message: str,
+    status: EstadoDocumento = EstadoDocumento.NO_VERIFICADO,
+) -> PropuestaExtraida:
+    proposal = PropuestaExtraida(
         archivo=filename,
         fuente=source,
         anomalias_ingesta=[message],
+    )
+    proposal._estado_evaluacion = status
+    return proposal
+
+
+def _is_api_503(error: Exception) -> bool:
+    return (
+        getattr(error, "code", None) == 503
+        or getattr(error, "status", None) == "UNAVAILABLE"
     )
 
 
@@ -227,7 +243,7 @@ def extract_proposal(file_path: str, api_key: Optional[str] = None) -> Propuesta
             for attempt in range(3):
                 try:
                     response = client.models.generate_content(
-                        model="gemini-flash-latest",
+                        model="gemini-3.8-flash",
                         contents=[types.Part.from_bytes(data=file_bytes, mime_type=mime_type), prompt],
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
@@ -247,13 +263,26 @@ def extract_proposal(file_path: str, api_key: Optional[str] = None) -> Propuesta
                     proposal.anomalias_ingesta = anomalies + proposal.anomalias_ingesta
                     return proposal
                 except Exception as exc:
+                    if not _is_api_503(exc):
+                        return _failure(filename, source, format_gemini_error(exc))
                     if attempt == 2:
                         return _failure(
                             filename,
                             source,
-                            "; ".join(anomalies + [f"Fallo tras 3 intentos de Gemini: {exc}"]),
+                            "; ".join(
+                                anomalies
+                                + [
+                                    "Gemini no estuvo disponible tras 3 intentos: "
+                                    f"{format_gemini_error(exc)}"
+                                ]
+                            ),
+                            status=EstadoDocumento.ERROR_API_503,
                         )
                     time.sleep(2**attempt)
     except Exception as exc:
-        return _failure(filename, source, f"No se pudo inicializar o cerrar el cliente Gemini: {exc}")
+        return _failure(
+            filename,
+            source,
+            f"No se pudo inicializar o cerrar el cliente Gemini: {format_gemini_error(exc)}",
+        )
     return _failure(filename, source, "La extracción terminó sin resultado.")

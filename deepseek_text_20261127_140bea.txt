@@ -3,7 +3,7 @@ Hackatón Venezuela INNOVA 2026. Stack obligatorio:
 - Backend: FastAPI + Pydantic v2 + SQLAlchemy + SQLite + Uvicorn
 - Frontend: Jinja2 + Tailwind CDN + Alpine.js CDN (sin build step)
 - IA: SDK oficial `google-genai` (NO `google-generativeai`), modelo
-  `gemini-2.5-flash`, con Google Search Grounding habilitado.
+  `gemini-3.8-flash`, con Google Search Grounding habilitado.
 - Cifrado: AES-256-GCM con `cryptography.hazmat.primitives.ciphers`
   (NO usar `cryptography.fernet`, que es AES-128).
 
@@ -80,7 +80,7 @@ proyecto/
 ==============================================================
 - Usa `google-genai`:
   client.models.generate_content(
-      model="gemini-2.5-flash",
+      model="gemini-3.8-flash",
       contents=[Part.from_bytes(data, mime_type), prompt],
       config=types.GenerateContentConfig(
           response_mime_type="application/json",

@@ -19,6 +19,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
+from agent.status import EstadoDocumento
+
 
 DATA_DIR = Path(os.environ.get("APP_DATA_DIR", "data")).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -72,6 +74,12 @@ class ProjectFile(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=True
     )
     quality: Mapped[str] = mapped_column(String(20), default="pendiente", nullable=False)
+    evaluation_status: Mapped[str] = mapped_column(
+        String(24),
+        default=EstadoDocumento.PENDIENTE.value,
+        server_default=EstadoDocumento.PENDIENTE.value,
+        nullable=False,
+    )
     audit_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     review_decision: Mapped[str | None] = mapped_column(String(30), nullable=True)
     review_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -142,10 +150,21 @@ def init_db() -> None:
             "freight_quote_currency": "VARCHAR(3)",
             "freight_quote_date": "VARCHAR(10)",
             "freight_quote_source": "VARCHAR(500)",
+            "evaluation_status": f"VARCHAR(24) NOT NULL DEFAULT '{EstadoDocumento.PENDIENTE.value}'",
         }
+        added_evaluation_status = "evaluation_status" not in file_columns
         for column, sql_type in file_additions.items():
             if column not in file_columns:
                 connection.execute(text(f"ALTER TABLE project_files ADD COLUMN {column} {sql_type}"))
+        if added_evaluation_status:
+            connection.execute(
+                text(
+                    "UPDATE project_files SET evaluation_status = 'COMPLETADO' "
+                    "WHERE (kind = 'propuesta' AND audit_json IS NOT NULL) "
+                    "OR (kind = 'proyecto' AND project_id IN "
+                    "(SELECT id FROM projects WHERE requirements_json IS NOT NULL))"
+                )
+            )
         run_columns = {column["name"] for column in inspect(connection).get_columns("evaluation_runs")}
         if "report_markdown" not in run_columns:
             connection.execute(text("ALTER TABLE evaluation_runs ADD COLUMN report_markdown TEXT"))

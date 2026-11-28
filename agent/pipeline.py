@@ -1,6 +1,7 @@
 import os
 from typing import Callable, List, Optional, Tuple
 
+from agent.errors import format_gemini_error
 from agent.finance import assess_financial_feasibility, to_usd
 from agent.extractor import extract_proposal
 from agent.market.search_grounding import research_market_price
@@ -12,6 +13,7 @@ from agent.schemas import (
     PropuestaExtraida,
     ResultadoAuditoria,
 )
+from agent.status import EstadoDocumento
 from agent.tco import calculate_tco
 from agent.validators.arithmetic import analyze_arithmetic, validate_arithmetic
 from agent.validators.compatibility import validate_compatibility
@@ -60,9 +62,36 @@ def run_pipeline(
             proposal = PropuestaExtraida(
                 archivo=filename,
                 fuente="pdf",
-                anomalias_ingesta=[f"Error inesperado durante la extracción: {exc}"],
+                anomalias_ingesta=[
+                    f"Error inesperado durante la extracción: {format_gemini_error(exc)}"
+                ],
             )
+            proposal._estado_evaluacion = EstadoDocumento.NO_VERIFICADO
         proposal.archivo = filename
+        extraction_status = proposal._estado_evaluacion
+        if extraction_status in {
+            EstadoDocumento.NO_VERIFICADO,
+            EstadoDocumento.ERROR_API_503,
+        }:
+            message = "; ".join(proposal.anomalias_ingesta) or "No se pudo verificar el documento."
+            report(
+                extraction_status.value.lower(),
+                f"{filename}: {message}",
+            )
+            audits.append(
+                ResultadoAuditoria(
+                    propuesta=proposal,
+                    estado_documento=extraction_status,
+                    alcance_estado="no_concluyente",
+                    alcance_advertencias=[message],
+                    notas=(
+                        "Error temporal de Gemini; el documento puede reintentarse."
+                        if extraction_status == EstadoDocumento.ERROR_API_503
+                        else "Documento no verificado; requiere corregir el problema antes de evaluarlo."
+                    ),
+                )
+            )
+            continue
 
         reasons: list[str] = []
         arithmetic_assessment = analyze_arithmetic(proposal)
@@ -244,6 +273,7 @@ def run_pipeline(
         audits.append(
             ResultadoAuditoria(
                 propuesta=proposal,
+                estado_documento=EstadoDocumento.COMPLETADO,
                 descartada=discarded,
                 motivos_descarte=reasons,
                 aritmetica=arithmetic_assessment,

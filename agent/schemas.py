@@ -2,7 +2,9 @@ from enum import Enum
 from datetime import datetime, timedelta
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+
+from agent.status import EstadoDocumento
 
 
 class FuenteEnum(str, Enum):
@@ -76,6 +78,8 @@ class ArithmeticAssessment(BaseModel):
 
 class PropuestaExtraida(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    _estado_evaluacion: Optional[EstadoDocumento] = PrivateAttr(default=None)
 
     archivo: str
     fuente: FuenteEnum
@@ -156,6 +160,8 @@ class ProjectRequirement(BaseModel):
 
 
 class ProjectRequirements(BaseModel):
+    _estado_evaluacion: Optional[EstadoDocumento] = PrivateAttr(default=None)
+
     archivo: str = ""
     requisitos: list[ProjectRequirement] = Field(default_factory=list)
     advertencias: list[str] = Field(default_factory=list)
@@ -163,6 +169,7 @@ class ProjectRequirements(BaseModel):
 
 class ResultadoAuditoria(BaseModel):
     propuesta: PropuestaExtraida
+    estado_documento: EstadoDocumento = EstadoDocumento.COMPLETADO
     descartada: bool = False
     motivos_descarte: list[str] = Field(default_factory=list)
     aritmetica: Optional[ArithmeticAssessment] = None

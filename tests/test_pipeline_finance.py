@@ -11,6 +11,7 @@ from agent.schemas import (
     PropuestaExtraida,
     TotalesDeclarados,
 )
+from agent.status import EstadoDocumento
 from tests.conftest import evidencia, propuesta
 
 
@@ -140,3 +141,22 @@ def test_pipeline_does_not_discard_on_low_confidence_project_requirements(tmp_pa
     assert not audits[0].descartada
     assert audits[0].alcance_estado == "no_concluyente"
     assert audits[0].alcance_advertencias
+
+
+def test_pipeline_keeps_api_503_proposal_retryable_and_out_of_ranking(tmp_path, monkeypatch):
+    proposal_dir = tmp_path / "propuestas"
+    proposal_dir.mkdir()
+    (proposal_dir / "oferta.pdf").write_bytes(b"fixture")
+    failed_proposal = PropuestaExtraida(
+        archivo="oferta.pdf",
+        fuente="pdf",
+        anomalias_ingesta=["Gemini no disponible: 503 UNAVAILABLE"],
+    )
+    failed_proposal._estado_evaluacion = EstadoDocumento.ERROR_API_503
+    monkeypatch.setattr("agent.pipeline.extract_proposal", lambda *_args, **_kwargs: failed_proposal)
+
+    audits, ranking = run_pipeline(str(tmp_path))
+
+    assert audits[0].estado_documento == EstadoDocumento.ERROR_API_503
+    assert not audits[0].descartada
+    assert ranking == []

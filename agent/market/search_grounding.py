@@ -66,7 +66,7 @@ def research_market_price(componente: str, api_key: Optional[str] = None) -> Pri
     try:
         with genai.Client(api_key=key) as client:
             response = client.models.generate_content(
-                model="gemini-flash-latest",
+                model="gemini-3.8-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     tools=[types.Tool(google_search=types.GoogleSearch())],

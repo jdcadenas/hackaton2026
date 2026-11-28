@@ -10,7 +10,7 @@ Aplicación para recibir y auditar propuestas de adquisición de equipos, con un
 
 No hay cuentas ni contraseñas predeterminadas en el proyecto: los usuarios se crean mediante `APP_USERS_JSON`.
 
-El proyecto usa `gemini-flash-latest`, modelo que se verificó respondiendo correctamente con la clave local el 27 de noviembre de 2026. La selección puede cambiar si Google modifica el acceso o la disponibilidad de modelos.
+El proyecto usa `gemini-3.8-flash`, modelo que se verificó respondiendo correctamente con la clave local el 27 de noviembre de 2026. La selección puede cambiar si Google modifica el acceso o la disponibilidad de modelos.
 
 ## Instalación y configuración
 
@@ -96,7 +96,7 @@ from google import genai
 
 with genai.Client() as client:
     response = client.models.generate_content(
-        model="gemini-flash-latest",
+        model="gemini-3.8-flash",
         contents="Responde solo OK",
     )
     print(response.text)
@@ -129,7 +129,7 @@ from google import genai
 
 with genai.Client() as client:
     response = client.models.generate_content(
-        model="gemini-flash-latest",
+        model="gemini-3.8-flash",
         contents="Responde solo OK",
     )
     print(response.text)
@@ -195,6 +195,8 @@ Antes de evaluar, el rol **Aprobador** registra la tasa BCV en VES por USD, fech
 En **Recepción**, Carga o Aprobador puede registrar por propuesta una cotización adicional de transporte con monto final (incluidos los impuestos del flete si aplican), moneda, fecha y fuente. El sistema la convierte con la tasa BCV del proyecto y la suma al TCO; si la oferta declara el flete incluido, evita duplicarlo. Si no hay cotización ni confirmación de flete incluido, no inventa una tarifa y deja la factibilidad no concluyente. Los recargos porcentuales se calculan sobre el subtotal, salvo que la cláusula indique que aplican al valor de la factura; el desglose y los avisos se muestran en la trazabilidad y el informe.
 
 El botón **Evaluar propuestas de servicios** conserva en pantalla los eventos en vivo: lectura y extracción del PDF base y las propuestas, validaciones, componentes del TCO, cotización del flete usada o faltante, búsquedas web por ítem y resultado. El informe presenta una recomendación solo si hay una propuesta con aritmética y alcance conformes, TCO completo y costo dentro del presupuesto; incluye una matriz de montos declarados, conciliación aritmética y TCO ajustado, y dictámenes cuantificados. Las alertas de precios web son indicativas y no causan descarte automático. Se puede imprimir a PDF desde el navegador o descargar como Markdown/CSV. Los proyectos existentes reciben las columnas nuevas al iniciar la app, pero hay que completar manualmente ciudad, estado, presupuesto y referencia BCV antes de evaluarlos.
+
+Cada documento mantiene un estado de evaluación. Si una propuesta falla por un error temporal 503 de Gemini, queda marcada como reintentable; el botón de reintento procesa solo propuestas pendientes o con ese error y conserva las evaluaciones ya completadas.
 
 ### Historial y etapas del proceso
 

@@ -1,5 +1,6 @@
 from typing import List
 from agent.schemas import ResultadoAuditoria
+from agent.status import EstadoDocumento
 
 def rank_audits(audits: List[ResultadoAuditoria]) -> List[str]:
     # Keep one deterministic result per proposal filename.
@@ -7,8 +8,12 @@ def rank_audits(audits: List[ResultadoAuditoria]) -> List[str]:
     for audit in audits:
         by_name.setdefault(audit.propuesta.archivo, audit)
     unique_audits = list(by_name.values())
-    evaluadas = [a for a in unique_audits if not a.descartada]
-    descartadas = [a for a in unique_audits if a.descartada]
+    verified_audits = [
+        audit for audit in unique_audits
+        if audit.estado_documento == EstadoDocumento.COMPLETADO
+    ]
+    evaluadas = [a for a in verified_audits if not a.descartada]
+    descartadas = [a for a in verified_audits if a.descartada]
 
     currencies = {audit.tco.moneda for audit in evaluadas if audit.tco and audit.tco.moneda}
     can_compare_raw_tco = len(currencies) <= 1 and not any(a.factibilidad_financiera for a in evaluadas)

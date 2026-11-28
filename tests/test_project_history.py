@@ -2,7 +2,9 @@ import asyncio
 import csv
 import io
 import json
+import threading
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -12,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 
 from agent.schemas import FinancialAssessment, ProjectRequirements, ResultadoAuditoria, TCO
+from agent.status import EstadoDocumento
 from app import main
 from app.db import AuditEvent, Base, EvaluationRun, Project, ProjectFile
 from tests.conftest import propuesta
@@ -66,6 +69,7 @@ def _proposal(project_id: str, file_id: str, filename: str, decision: str | None
         relative_path=f"uploads/{file_id}.enc",
         kind="propuesta",
         audit_json=_audit_json(filename),
+        evaluation_status=EstadoDocumento.COMPLETADO.value,
         review_decision=decision,
     )
 
@@ -191,6 +195,7 @@ def test_invalidating_current_evaluation_does_not_delete_run_snapshot():
 
     assert proposal_record.audit_json is None
     assert proposal_record.review_decision is None
+    assert proposal_record.evaluation_status == EstadoDocumento.PENDIENTE.value
     assert run.results_json == original_snapshot
     assert project.status == "Recepción"
     db.close()
@@ -364,6 +369,76 @@ def test_startup_recovers_interrupted_evaluation(monkeypatch):
     db.close()
 
 
+def test_evaluation_start_preserves_completed_proposals_and_retry_status(monkeypatch):
+    db = _session()
+    project = Project(
+        id="project-retry",
+        title="Compra",
+        status="Revisión",
+        execution_city="Caracas",
+        execution_state="Distrito Capital",
+        budget_amount=500,
+        budget_currency="USD",
+        bcv_rate=50,
+        bcv_date=date.today().isoformat(),
+        bcv_source="BCV",
+    )
+    project_document = ProjectFile(
+        id="requirements-retry",
+        project_id=project.id,
+        original_name="requerimientos.pdf",
+        relative_path="requirements.enc",
+        kind="proyecto",
+        evaluation_status=EstadoDocumento.COMPLETADO.value,
+    )
+    completed = [
+        _proposal(project.id, "proposal-done-1", "completada-1.pdf", "aceptar"),
+        _proposal(project.id, "proposal-done-2", "completada-2.pdf", "observar"),
+    ]
+    retryable = _proposal(project.id, "proposal-retry", "fallida.pdf")
+    retryable.evaluation_status = EstadoDocumento.ERROR_API_503.value
+    retryable.audit_json = None
+    completed_audits = {record.id: record.audit_json for record in completed}
+    db.add_all([project, project_document, *completed, retryable])
+    db.commit()
+    monkeypatch.setattr(main, "_user", lambda _request: {"username": "carga", "role": "Carga"})
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    page_response = main.project_page(request, project.id, "evaluacion", db)
+    assert b"Reintentar pendientes por error de servidor" in page_response.body
+
+    class NoopThread:
+        def __init__(self, target, daemon):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(threading, "Thread", NoopThread)
+
+    response = asyncio.run(
+        main.evaluate_stream(
+            request=object(),
+            project_id=project.id,
+            db=db,
+        )
+    )
+
+    assert response.media_type == "text/event-stream"
+    assert {record.id: record.audit_json for record in completed} == completed_audits
+    assert all(record.evaluation_status == EstadoDocumento.COMPLETADO.value for record in completed)
+    assert retryable.evaluation_status == EstadoDocumento.ERROR_API_503.value
+    assert retryable.audit_json is None
+    run = db.query(EvaluationRun).filter_by(project_id=project.id).one()
+    assert run.status == "running"
+    snapshot = json.loads(run.project_snapshot_json)
+    assert {item["evaluation_status"] for item in snapshot["proposals"]} == {
+        EstadoDocumento.COMPLETADO.value,
+        EstadoDocumento.ERROR_API_503.value,
+    }
+    db.close()
+
+
 def test_evaluate_persists_run_snapshot_and_advances_project(monkeypatch, tmp_path):
     engine = create_engine(
         "sqlite://",
@@ -393,6 +468,13 @@ def test_evaluate_persists_run_snapshot_and_advances_project(monkeypatch, tmp_pa
         kind="proyecto",
     )
     proposal_record = _proposal(project.id, "proposal-6", "oferta.pdf")
+    proposal_record.evaluation_status = EstadoDocumento.PENDIENTE.value
+    failed_record = _proposal(project.id, "proposal-6-failed", "fallida.pdf")
+    failed_record.evaluation_status = EstadoDocumento.ERROR_API_503.value
+    failed_record.audit_json = None
+    completed_record = _proposal(project.id, "proposal-6-completed", "oferta-completada.pdf", "aceptar")
+    completed_record.evaluation_status = EstadoDocumento.COMPLETADO.value
+    completed_audit_json = completed_record.audit_json
     run = EvaluationRun(
         id="run-6",
         project_id=project.id,
@@ -400,11 +482,12 @@ def test_evaluate_persists_run_snapshot_and_advances_project(monkeypatch, tmp_pa
         status="running",
         project_snapshot_json=json.dumps(main._project_snapshot(project)),
     )
-    db.add_all([project, project_file, proposal_record, run])
+    db.add_all([project, project_file, proposal_record, failed_record, completed_record, run])
     db.commit()
     (tmp_path / "requirements.enc").write_bytes(b"encrypted")
     (tmp_path / proposal_record.relative_path).parent.mkdir(parents=True)
     (tmp_path / proposal_record.relative_path).write_bytes(b"encrypted")
+    (tmp_path / failed_record.relative_path).write_bytes(b"encrypted")
     monkeypatch.setattr(main, "SessionLocal", lambda: Session(engine))
     monkeypatch.setattr(main, "DATA_DIR", tmp_path)
     monkeypatch.setattr(main, "decrypt_bytes", lambda *_args: b"document")
@@ -414,20 +497,45 @@ def test_evaluate_persists_run_snapshot_and_advances_project(monkeypatch, tmp_pa
         lambda _path: ProjectRequirements(archivo="requerimientos.pdf"),
     )
     audit = ResultadoAuditoria.model_validate_json(_audit_json("oferta.pdf"))
-    monkeypatch.setattr(main, "run_pipeline", lambda *_args, **_kwargs: ([audit], ["oferta.pdf"]))
+    failed_audit = ResultadoAuditoria.model_validate_json(_audit_json("fallida.pdf"))
+    failed_audit.estado_documento = EstadoDocumento.ERROR_API_503
+    failed_audit.notas = "Error temporal de Gemini."
+    processed_files = []
+    audits_by_name = {
+        "oferta.pdf": audit,
+        "fallida.pdf": failed_audit,
+    }
+
+    def fake_run_pipeline(lote_dir, **_kwargs):
+        filenames = [path.name for path in (Path(lote_dir) / "propuestas").iterdir()]
+        processed_files.extend(filenames)
+        document_audits = [audits_by_name[filename] for filename in filenames]
+        return document_audits, [audit.propuesta.archivo for audit in document_audits]
+
+    monkeypatch.setattr(main, "run_pipeline", fake_run_pipeline)
 
     main._evaluate(project.id, run.id, lambda *_args: None)
     db.refresh(project)
     db.refresh(proposal_record)
+    db.refresh(failed_record)
+    db.refresh(completed_record)
     db.refresh(run)
 
     archived_results = json.loads(run.results_json)
     assert project.status == "Revisión"
     assert run.status == "completed"
     assert run.completed_at is not None
-    assert archived_results[0]["file_id"] == proposal_record.id
-    assert json.loads(archived_results[0]["audit_json"])["propuesta"]["archivo"] == "oferta.pdf"
-    assert proposal_record.audit_json == archived_results[0]["audit_json"]
+    archived_by_id = {result["file_id"]: result for result in archived_results}
+    assert archived_by_id[proposal_record.id]["original_name"] == "oferta.pdf"
+    assert json.loads(archived_by_id[proposal_record.id]["audit_json"])["propuesta"]["archivo"] == "oferta.pdf"
+    assert proposal_record.audit_json == archived_by_id[proposal_record.id]["audit_json"]
+    assert proposal_record.evaluation_status == EstadoDocumento.COMPLETADO.value
+    assert failed_record.evaluation_status == EstadoDocumento.ERROR_API_503.value
+    assert not ResultadoAuditoria.model_validate_json(failed_record.audit_json).descartada
+    assert completed_record.audit_json == completed_audit_json
+    assert completed_record.review_decision == "aceptar"
+    assert completed_record.evaluation_status == EstadoDocumento.COMPLETADO.value
+    assert set(processed_files) == {"oferta.pdf", "fallida.pdf"}
     assert run.requirements_json is not None
     assert "- **Ejecución:** #1" in run.report_markdown
     db.close()

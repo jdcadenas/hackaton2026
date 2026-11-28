@@ -81,7 +81,7 @@ Sigue estos pasos en **PowerShell**, en una terminal nueva de VS Code:
 
 4. **Prueba la conexión**:
    ```powershell
-   python -c 'from google import genai; r=genai.Client().models.generate_content(model="gemini-2.5-flash", contents="Responde solo OK"); print(r.text)'
+   python -c 'from google import genai; r=genai.Client().models.generate_content(model="gemini-3.8-flash", contents="Responde solo OK"); print(r.text)'
    ```
    Debe responder `OK`. Si recibes un error de permisos o cuota, revisa el proyecto, la clave y su acceso a Gemini en AI Studio.
 
@@ -98,7 +98,7 @@ TURNO 5 — 2026-11-27T05:15:25.096Z
 ------------------------------------------------------------------------------
 USUARIO:
 será que puedes cambiar el modelo porque esta dando error en la conexion File "<string>", line 1, in <module>
-    from google import genai; r=genai.Client().models.generate_content(model="gemini-2.5-flash", contents="Responde solo OK"); print(r.text)
+    from google import genai; r=genai.Client().models.generate_content(model="gemini-3.8-flash", contents="Responde solo OK"); print(r.text)
                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "C:\Users\jdcad\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\google\genai\models.py", line 6204, in generate_content
     response = self._generate_content_with_continuation(
@@ -143,7 +143,7 @@ RuntimeError: Cannot send a request, as the client has been closed.
 ASISTENTE:
 Ese error **no señala un modelo inválido**: dice que el cliente HTTP ya estaba cerrado. El comando anterior usaba `genai.Client()` directamente en una sola expresión; debí darte uno que mantuviera abierto el cliente.
 
-No cambié `gemini-2.5-flash` porque el reto exige ese modelo. Sí cambié el uso del cliente para cerrarlo correctamente en [extractor.py](C:/Users/jdcad/hackaton2026/agent/extractor.py), [search_grounding.py](C:/Users/jdcad/hackaton2026/agent/market/search_grounding.py) y [main.py](C:/Users/jdcad/hackaton2026/app/main.py). Actualicé también el ejemplo de prueba en [README.md](C:/Users/jdcad/hackaton2026/README.md). **Las 28 pruebas pasan**; no hice una llamada real porque no tengo tu clave.
+No cambié `gemini-3.8-flash` porque el reto exige ese modelo. Sí cambié el uso del cliente para cerrarlo correctamente en [extractor.py](C:/Users/jdcad/hackaton2026/agent/extractor.py), [search_grounding.py](C:/Users/jdcad/hackaton2026/agent/market/search_grounding.py) y [main.py](C:/Users/jdcad/hackaton2026/app/main.py). Actualicé también el ejemplo de prueba en [README.md](C:/Users/jdcad/hackaton2026/README.md). **Las 28 pruebas pasan**; no hice una llamada real porque no tengo tu clave.
 
 Después de configurar `GEMINI_API_KEY`, prueba en **la misma terminal de PowerShell**:
 
@@ -153,7 +153,7 @@ from google import genai
 
 with genai.Client() as client:
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents="Responde solo OK",
     )
     print(response.text)
@@ -215,7 +215,7 @@ Ya preparé el proyecto para leer un `.env` local: agregué [.env.example](C:/Us
 
    with genai.Client() as client:
        response = client.models.generate_content(
-           model="gemini-2.5-flash",
+           model="gemini-3.8-flash",
            contents="Responde solo OK",
        )
        print(response.text)
@@ -226,7 +226,7 @@ Ya preparé el proyecto para leer un `.env` local: agregué [.env.example](C:/Us
    uvicorn app.main:app --reload
    ```
 
-Conservé `gemini-2.5-flash`, que es el modelo exigido; el error anterior apuntaba al ciclo de vida del cliente, no al modelo. Verifiqué la carga de `.env` con un valor de prueba y las **28 pruebas pasan**.
+Conservé `gemini-3.8-flash`, que es el modelo exigido; el error anterior apuntaba al ciclo de vida del cliente, no al modelo. Verifiqué la carga de `.env` con un valor de prueba y las **28 pruebas pasan**.
 
 ==============================================================================
 TURNO 7 — 2026-11-27T05:24:07.712Z
@@ -295,7 +295,7 @@ from google import genai
 
 with genai.Client() as client:
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents="Responde solo OK",
     )
     print(response.text)
@@ -323,7 +323,7 @@ load_dotenv()
 from google import genai
 with genai.Client() as client:
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents="Responde solo OK",
     )
     print(response.text)
@@ -402,11 +402,11 @@ Traceback (most recent call last):
     ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "C:\Users\jdcad\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\google\genai\errors.py", line 216, in raise_error
     raise ClientError(status_code, response_json, response)
-google.genai.errors.ClientError: 404 NOT_FOUND. {'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'}}
+google.genai.errors.ClientError: 404 NOT_FOUND. {'error': {'code': 404, 'message': 'This model models/gemini-3.8-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements. We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).', 'status': 'NOT_FOUND'}}
 
 
 ASISTENTE:
-Ese `404` confirma que `gemini-2.5-flash` no está habilitado para tu cuenta nueva. Cambié el modelo a **`gemini-3.8-flash`** en el extractor, la búsqueda de mercado, el chat y las pruebas del [README](C:/Users/jdcad/hackaton2026/README.md). Las 28 pruebas pasan; no volví a usar tu clave.
+Ese `404` confirma que `gemini-3.8-flash` no está habilitado para tu cuenta nueva. Cambié el modelo a **`gemini-3.8-flash`** en el extractor, la búsqueda de mercado, el chat y las pruebas del [README](C:/Users/jdcad/hackaton2026/README.md). Las 28 pruebas pasan; no volví a usar tu clave.
 
 Desde Git Bash, en la raíz del proyecto, vuelve a probar:
 

@@ -1,10 +1,12 @@
 from types import SimpleNamespace
 
 from PIL import Image
+from google.genai.errors import ClientError, ServerError
 from openpyxl import Workbook
 
 from agent.extractor import extract_proposal
 from agent.schemas import Evidencia, Item, PropuestaExtraida, TotalesDeclarados
+from agent.status import EstadoDocumento
 
 
 def test_image_extraction_uses_gemini_json_schema(tmp_path, monkeypatch):
@@ -37,7 +39,7 @@ def test_image_extraction_uses_gemini_json_schema(tmp_path, monkeypatch):
             return False
 
         def generate_content(self, **kwargs):
-            assert kwargs["model"] == "gemini-flash-latest"
+            assert kwargs["model"] == "gemini-3.8-flash"
             assert kwargs["config"].response_json_schema == PropuestaExtraida.model_json_schema()
             return SimpleNamespace(text=expected.model_dump_json())
 
@@ -63,3 +65,55 @@ def test_xlsx_extraction_closes_workbook_and_does_not_invent_rows(tmp_path):
     assert proposal.totales_declarados.subtotal is None
     path.unlink()
     assert not path.exists()
+
+
+def test_gemini_503_marks_proposal_retryable(tmp_path, monkeypatch):
+    path = tmp_path / "oferta.png"
+    Image.new("RGB", (10, 10), "white").save(path)
+    calls = []
+
+    class FakeClient:
+        def __enter__(self):
+            self.models = self
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def generate_content(self, **_kwargs):
+            calls.append("called")
+            raise ServerError(503, {"error": {"status": "UNAVAILABLE"}})
+
+    monkeypatch.setattr("agent.extractor.genai.Client", lambda **_kwargs: FakeClient())
+    monkeypatch.setattr("agent.extractor.time.sleep", lambda _delay: None)
+
+    proposal = extract_proposal(str(path), api_key="test-key")
+
+    assert len(calls) == 3
+    assert proposal._estado_evaluacion == EstadoDocumento.ERROR_API_503
+    assert proposal.anomalias_ingesta
+
+
+def test_non_503_gemini_error_marks_proposal_unverified_without_retry(tmp_path, monkeypatch):
+    path = tmp_path / "oferta.png"
+    Image.new("RGB", (10, 10), "white").save(path)
+    calls = []
+
+    class FakeClient:
+        def __enter__(self):
+            self.models = self
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def generate_content(self, **_kwargs):
+            calls.append("called")
+            raise ClientError(401, {"error": {"status": "UNAUTHENTICATED"}})
+
+    monkeypatch.setattr("agent.extractor.genai.Client", lambda **_kwargs: FakeClient())
+
+    proposal = extract_proposal(str(path), api_key="test-key")
+
+    assert len(calls) == 1
+    assert proposal._estado_evaluacion == EstadoDocumento.NO_VERIFICADO
